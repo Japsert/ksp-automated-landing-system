@@ -53,7 +53,7 @@ function calculateLandingBurnHeight {
 }
 
 // Full throttle until we're a certain distance above the ground
-when groundHeight >= 1000 then {
+when groundHeight >= 20 then {
     // Cut off the engine
     lock throttle to 0.
     setStatus("Cut throttle, waiting for landing burn...").
