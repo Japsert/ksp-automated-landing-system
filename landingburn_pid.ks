@@ -4,7 +4,7 @@ lock steering to up.
 stage.
 set startTime to time:seconds.
 
-set Kp to 0.042.
+set Kp to 0.100.
 set Ki to 0.019.
 set Kd to 0.237.
 
@@ -23,8 +23,11 @@ lock throttle to wanted_throttle.
 
 lock groundAltitude to alt:radar.
 
-// extension complains, but the variable is getting used in the loop
 set logPath to "0:/logs/" + Kp + "_" + Ki + "_" + Kd + ".log".
+if exists(logPath) {
+    deletePath(logPath).
+    print "Deleted old log file.".
+}
 
 until false {
     set wanted_throttle to pid:update(time:seconds, groundAltitude).
