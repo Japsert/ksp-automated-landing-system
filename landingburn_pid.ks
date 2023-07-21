@@ -3,7 +3,8 @@ set BURN_THROTTLE to 0.8.
 set SHIP_BOUNDS to ship:bounds.
 set TICKS_PER_SECOND to 50.
 set THROTTLE_DELAY_TICKS to 3.
-set SAMPLE_COUNT to 5.
+set FE_SAMPLE_COUNT to 10.
+set G_SAMPLE_COUNT to 3.
 set DOLOG to false.
 if DOLOG {
     set LOG_PATH to "0:/logs/" + ship:altitude + ".log".
@@ -19,46 +20,105 @@ if DOLOG {
 stage.
 lock steering to up.
 set isBurnStarted to false.
-set meanELA to 5001. // > 0 to not trigger the when condition below
-set throttleDelayDistance to 0.
-when meanELA + throttleDelayDistance <= 0 then {
-    set isBurnStarted to true.
-    lock throttle to 0.8.
-}
+set meanELA to 0.
+
+// Logging trigger
 set doLog to false.
-when meanELA <= 5000 then {
-    if DOLOG set doLog to true.
+if DOLOG {
+    when meanELA <= 5000 then {
+        set doLog to true.
+    }
 }
 
-set realVerticalAcc to 0.0.
-set lastTime to time:seconds.
-set lastVerticalSpeed to verticalSpeed.
+set interpolatedELA to meanELA.
+set throttleDelayDistance to 0.
+
+set oldELA to meanELA.
+set ticksPerUpdate to 0.
+set dELA to 0.
+set dELAPerTick to 0.
+set ticksSinceUpdate to 0.
+set canInterpolate to false.
 when true then {
-    set dt to time:seconds - lastTime.
-    set realVerticalAcc to (verticalSpeed - lastVerticalSpeed) * 1/dt.
-    set lastTime to time:seconds.
-    set lastVerticalSpeed to verticalSpeed.
+    set newELA to meanELA.
+    
+    if oldELA = newELA {
+        // no new ELA value, interpolate
+        set ticksSinceUpdate to ticksSinceUpdate + 1.
+        if canInterpolate {
+            set dELAPerTick to dELA / ticksPerUpdate.
+            set interpolatedELA to oldELA - dELAPerTick * ticksSinceUpdate.
+        }
+    } else {
+        // ELA value updated
+        if not canInterpolate and dELA <> 0 {
+            // newELA is now our second known value, so we know how much to change
+            set canInterpolate to true.
+        }
+        set dELA to oldELA - newELA.
+        set interpolatedELA to newELA.
+        set ticksPerUpdate to ticksSinceUpdate.
+        set ticksSinceUpdate to 0.
+        set oldELA to newELA.
+    }
+    
+    // Print interpolated ELA for debugging
+    printAt("interpolated ELA:      " + round(interpolatedELA, 2) + "     ", 0, 16).
+    // dELAPerTick is an estimate for the error
+    printAt("dELAPerTick:           " + round(dELAPerTick, 2) + "     ", 0, 17).
+
+    printAt("LHS:                   " + round(interpolatedELA + throttleDelayDistance, 2) + "     ", 0, 19).
+    printAt("RHS:                   " + round(dELA + dELAPerTick/2, 2) + "     ", 0, 20).
     preserve.
+}
+
+// Setup start burn trigger (wait until we have an actual interpolated ELA)
+when canInterpolate then {
+    // Start the burn when the interpolated ELA is less than the throttle delay distance and nearest to an interval of dELAPerTick
+    when interpolatedELA + throttleDelayDistance <= dELA + dELAPerTick/2 then {
+        set isBurnStarted to true.
+        lock throttle to 0.8.
+            printAt("Burn started.", 0, 22).
+            printAt("interpolated ELA:      " + round(interpolatedELA, 2) + "     ", 0, 23).
+            printAt("throttleDelayDistance: " + round(throttleDelayDistance, 2) + "     ", 0, 24).
+            printAt("dELA:                  " + round(dELA, 2) + "     ", 0, 25).
+            printAt("dELAPerTick:           " + round(dELAPerTick, 2) + "     ", 0, 26).
+            
+            printAt("LHS:                   " + round(interpolatedELA + throttleDelayDistance, 2) + "     ", 0, 27).
+            printAt("RHS:                   " + round(dELA + dELAPerTick/2, 2) + "     ", 0, 28).
+            // difference between LHS and RHS is the error
+            printAt("error:                 " + round(interpolatedELA + throttleDelayDistance - (dELA + dELAPerTick/2), 2) + "     ", 0, 29).
+        }
 }
 
 function getMeanFe {
     parameter t. // throttle
     set s to ship:altitude.
-    set facingVector to facing:vector.
+    set zenith to vectorangle(ship:up:forevector, ship:facing:forevector).
+    set verticalThrustModifier to cos(zenith).
     set FeSum to 0.
-    for i in range(SAMPLE_COUNT) {
-        set altToCheck to i * s/(SAMPLE_COUNT-1). // evenly spaced (including 0 and s)
+    for i in range(FE_SAMPLE_COUNT) {
+        set altToCheck to i * s/(FE_SAMPLE_COUNT-1). // evenly spaced (including 0 and s)
         set FeSum to FeSum + ship:availableThrustAt(
             body:atm:altitudePressure(altToCheck)
-        ) * t * facingVector:z.
+        ) * t * verticalThrustModifier.
     }
-    return FeSum / SAMPLE_COUNT.
+    return FeSum / FE_SAMPLE_COUNT.
 }
 
 function getMeanG {
     set s to ship:altitude.
     // return average of ground level g and current g
-    return (body:mu / body:radius^2 + body:mu / (body:radius + s)^2) / 2.
+    //return (body:mu / body:radius^2 + body:mu / (body:radius + s)^2) / 2.
+    
+    set s to ship:altitude.
+    set gSum to 0.
+    for i in range(G_SAMPLE_COUNT) {
+        set altToCheck to i * s/(G_SAMPLE_COUNT-1). // evenly spaced (including 0 and s)
+        set gAtAlt to body:mu / (body:radius + altToCheck)^2.
+        set gSum to gSum + gAtAlt.
+    }
+    return gSum / G_SAMPLE_COUNT.
 }
 
 set tickStartTime to time:seconds.
@@ -80,10 +140,10 @@ until ship:status = "landed" {
         set meanG to getMeanG().                // gravity will increase as we descend
         set meanFz to meanG * ship:mass.        // TODO: estimate mass loss
         set meanFres to meanFe - meanFz.        // TODO: estimate drag
-        set meanVAcc to meanFres / ship:mass.    // acceleration will decrease as we descend
+        set meanVAcc to meanFres / ship:mass.   // acceleration will decrease as we descend
         // s = s0 + v0*t + 1/2*a*t^2
         //   = s0 - v0^2 / (2*a)
-        set meanELA to s0 - v0^2 / (2*meanVAcc).
+        set meanELA to s0 - (v0^2) / (2*meanVAcc).
         set throttleDelayDistance to
             v0 * THROTTLE_DELAY_TICKS * 1/TICKS_PER_SECOND.
     } else {
@@ -94,58 +154,35 @@ until ship:status = "landed" {
         set meanFz to meanG * ship:mass.
         set meanFres to meanFe - meanFz.
         set meanVAcc to meanFres / ship:mass.
-        set meanELA to s0 - v0^2 / (2*meanVAcc).
+        set meanELA to s0 - (v0^2) / (2*meanVAcc).
     }
     
     // Print program variables for debugging
-    printAt("isBurnStarted:      " + isBurnStarted + " ", 0, 11).
-    printAt("altitude:           " + round(s0, 2) + "        ", 0, 12).
-    printAt("vertical speed:     " + round(v0, 2) + "        ", 0, 13).
+    printAt("isBurnStarted:         " + isBurnStarted + " ", 0, 11).
+    printAt("altitude:              " + round(s0, 2) + "        ", 0, 12).
+    printAt("vertical speed:        " + round(v0, 2) + "        ", 0, 13).
     
-    set Fe to ship:availableThrust * BURN_THROTTLE.
-    printAt("Fe / meanFe:        " + round(Fe, 2)   + " / " + round(meanFe, 2)   + "        ", 0, 15).
-    set g to body:mu / (body:radius + ship:altitude)^2.
-    printAt("g / meanG:          " + round(g, 2)    + " / " + round(meanG, 2)    + "        ", 0, 16).
-    set Fz to g * ship:mass.
-    printAt("Fz / meanFz:        " + round(Fz, 2)   + " / " + round(meanFz, 2)   + "        ", 0, 17).
-    set Fres to Fe - Fz.
-    printAt("Fres / meanFres:    " + round(Fres, 2) + " / " + round(meanFres, 2) + ", real: " + round(ship:mass * realVerticalAcc, 2) + "        ", 0, 18).
-    
-    set vAcc to Fres / ship:mass.
-    printAt("vAcc / meanVAcc:    " + round(vAcc, 2)  + " / " + round(meanVAcc, 2)  + ", real: " + round(realVerticalAcc, 2) + "        ", 0, 19).
-    
-    set ELA to s0 - v0^2 / (2*vAcc).
-    printAt("ELA / meanELA:      " + round(ELA, 2)  + " / " + round(meanELA, 2)  + "        ", 0, 21).
-    printAt("throttleOffset:     " + round(throttleDelayDistance, 2) + "        ", 0, 22).
-    
-    // print real Fres and current calculated Fres
-    printAt("these need to be equal:", 0, 24).
-    printAt("- real Fres:    " + round(ship:mass * realVerticalAcc, 2) + "        ", 0, 25).
-    printAt("- current Fres: " + round(ship:thrust - Fz, 2) + "        ", 0, 26).
-    // print real vAcc and current calculated vAcc
-    printAt("and these:", 0, 27).
-    printAt("- real vAcc:    " + round(realVerticalAcc, 2) + "        ", 0, 28).
-    printAt("- current vAcc: " + round((ship:thrust - Fz) / ship:mass, 2) + "        ", 0, 29).
+    printAt("ELA:                   " + round(meanELA, 2) + "  ", 0, 15).
     
     // Log variables for debugging
     if doLog {
         log time:seconds
-        + "," + s0
-        + "," + v0
-        + "," + meanVAcc
-        + "," + Fe
-        + "," + meanFe
-        + "," + g
-        + "," + meanG
-        + "," + Fz
-        + "," + meanFz
-        + "," + Fres
-        + "," + meanFres
-        + "," + meanELA
-        + "," + throttleDelayDistance
-        + "," + throttle
-        + "," + isBurnStarted
-    to LOG_PATH.
+            + "," + s0
+            + "," + v0
+            + "," + meanVAcc
+            + "," + Fe
+            + "," + meanFe
+            + "," + g
+            + "," + meanG
+            + "," + Fz
+            + "," + meanFz
+            + "," + Fres
+            + "," + meanFres
+            + "," + meanELA
+            + "," + throttleDelayDistance
+            + "," + throttle
+            + "," + isBurnStarted
+        to LOG_PATH.
     }
     
     wait 0.
