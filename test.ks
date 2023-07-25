@@ -17,31 +17,42 @@ set ticksSinceUpdate to 0.
 set canInterpolate to false.
 when true then {
     set newValue to value.
+    
     if oldValue = newValue {
         // no new value, interpolate
         set ticksSinceUpdate to ticksSinceUpdate + 1.
         if canInterpolate {
-            set interpolatedValue to oldValue - dValue * ticksSinceUpdate / ticksPerUpdate.
+            set dValuePerTick to
+                choose dValue / ticksPerUpdate
+                if ticksPerUpdate <> 0
+                else 0.
+            set interpolatedValue to oldValue - dValuePerTick.
         }
     } else {
         // value updated
         if not canInterpolate and dValue <> 0 {
+            // newValue is now our second known value,
+            // so we know how much to interpolate by
             set canInterpolate to true.
         }
+        
         set dValue to oldValue - newValue.
         set ticksPerUpdate to ticksSinceUpdate.
         set ticksSinceUpdate to 0.
         set interpolatedValue to newValue.
         set oldValue to newValue.
     }
-    printAt("interpolated speed: " + interpolatedValue, 0, 11).
+    
+    printAt("interpolated speed:  " + round(interpolatedValue, 2) + "    ", 0, 11).
     
     // print variables for debugging
-    printAt("ticksPerUpdate: " + ticksPerUpdate, 0, 13).
-    printAt("ticksSinceLastValue: " + ticksSinceUpdate, 0, 14).
-    printAt("oldValue: " + oldValue, 0, 15).
-    printAt("newValue: " + newValue, 0, 16).
-    printAt("dValue: " + dValue, 0, 17).
+    printAt("ticksPerUpdate:      " + round(ticksPerUpdate, 2) + "    ", 0, 13).
+    printAt("ticksSinceLastValue: " + round(ticksSinceUpdate, 2) + "    ", 0, 14).
+    printAt("oldValue:            " + round(oldValue, 2) + "    ", 0, 15).
+    printAt("newValue:            " + round(newValue, 2) + "    ", 0, 16).
+    printAt("dValue:              " + round(dValue, 2) + "    ", 0, 17).
+    
+    printAt("diff:                " + round(diff, 2) + "    ", 0, 19).
     
     preserve.
 }
@@ -49,5 +60,5 @@ when true then {
 until false {
     wait 1.
     set value to verticalSpeed.
-    printAt("vertical speed:     " + value, 0, 10).
+    printAt("vertical speed:      " + round(value, 2) + "    ", 0, 10).
 }
