@@ -1,205 +1,288 @@
 clearScreen.
-set BURN_THROTTLE to 0.8.
-set SHIP_BOUNDS to ship:bounds.
-set TICKS_PER_SECOND to 50.
-set THROTTLE_DELAY_TICKS to 3.
-set FE_SAMPLE_COUNT to 10.
-set G_SAMPLE_COUNT to 3.
-set DOLOG to false.
-if DOLOG {
-    set LOG_PATH to "0:/logs/" + ship:altitude + ".log".
-    if exists(LOG_PATH) {
-        deletePath(LOG_PATH).
-        print("Deleted old log file.").
-    }
-    log "time,altitude,vertical speed,mean acceleration,Fe,meanFe,g,meanG,Fz,meanFz,Fres,meanFres,expectedLandingAlt,throttleOffset,throttle,isBurnStarted" to LOG_PATH.
-}
-
-// CONTROL
-
 stage.
 lock steering to up.
-set isBurnStarted to false.
-set meanELA to 0.
+lock throttle to 0.
 
-// Logging trigger
-set doLog to false.
-if DOLOG {
-    when meanELA <= 5000 then {
-        set doLog to true.
-    }
+set INITIAL_BURN_AP to 5000.
+
+if ship:status = "prelaunch" or ship:status = "landed" {
+    printAt("Burning until apoapsis >= " + INITIAL_BURN_AP + ".", 0, 0).
+    printAt("Press any key to interrupt.", 0, 1).
+    lock throttle to 1.
+    wait until terminal:input:haschar or ship:apoapsis >= INITIAL_BURN_AP.
+    clearScreen.
+    lock throttle to 0.
 }
 
-set interpolatedELA to meanELA.
-set throttleDelayDistance to 0.
 
-set oldELA to meanELA.
-set ticksPerUpdate to 0.
-set dELA to 0.
-set dELAPerTick to 0.
-set ticksSinceUpdate to 0.
-set canInterpolate to false.
+////////////////////////////////////////////////////////////////////////////////
+// Constants
+////////////////////////////////////////////////////////////////////////////////
+
+set START_TIME to time:seconds.            // Time at which the script started
+set LOG_PATH to "0:/logs/landingburn.log". // Path to log file
+if exists(LOG_PATH) deletePath(LOG_PATH).  // Delete log file if it exists
+set TERMINAL_LOGS to 0.
+set TERMINAL_VARS to 10.
+set numberOfVars to 0.
+lock TERMINAL_OTHER to TERMINAL_VARS + numberOfVars + 2.
+set TERMINAL_LAST TO terminal:height - 1.
+set SHIP_BOUNDS to ship:bounds.
+set BURN_THROTTLE to 1.      // Throttle to use during landing burn
+set THROTTLE_DELAY_TICKS to 3. // Number of ticks between setting throttle and
+                               // the acceleration changing
+set TICKS_PER_SECOND to 50.    // Number of ticks per second
+set PID to pidLoop(            // PID controller to control throttle
+    0.03,  // Kp
+    0.0,  // Ki
+    0.0   // Kd
+).
+//set interpBurnAltitude to 0.     // Interpolated burn altitude
+set PID:setpoint to 0.           // PID setpoint
+
+
+////////////////////////////////////////////////////////////////////////////////
+// Variables
+////////////////////////////////////////////////////////////////////////////////
+
+set wroteHeader to false.
+set isBurnStarted to false.      // Whether the landing burn has started
+set burnAltitude to 0.           // Altitude at which to start the landing burn
+lock groundAltitude to SHIP_BOUNDS:bottomaltradar. // Real altitude
+set v0 to ship:verticalspeed.
+
+
+////////////////////////////////////////////////////////////////////////////////
+// Triggers
+////////////////////////////////////////////////////////////////////////////////
+
+
+// Trigger that prints the vertical speed when we hit the ground,
+// for debugging purposes.
+when groundAltitude < 1 then {
+    printAt("vertical speed: " + round(ship:verticalspeed, 2), 0, TERMINAL_OTHER + 2).
+}
+
+// Trigger that updates the observed vertical acceleration.
+set lastV to ship:verticalspeed.
+set ticksSkipped to 0.
 when true then {
-    set newELA to meanELA.
-    
-    if oldELA = newELA {
-        // no new ELA value, interpolate
-        set ticksSinceUpdate to ticksSinceUpdate + 1.
-        if canInterpolate {
-            set dELAPerTick to dELA / ticksPerUpdate.
-            set interpolatedELA to oldELA - dELAPerTick * ticksSinceUpdate.
-        }
-    } else {
-        // ELA value updated
-        if not canInterpolate and dELA <> 0 {
-            // newELA is now our second known value, so we know how much to change
-            set canInterpolate to true.
-        }
-        set dELA to oldELA - newELA.
-        set interpolatedELA to newELA.
-        set ticksPerUpdate to ticksSinceUpdate.
-        set ticksSinceUpdate to 0.
-        set oldELA to newELA.
+    set ticksSkipped to ticksSkipped + 1.
+    if ticksSkipped = 2 {
+        set vAcc to (ship:verticalspeed - lastV) * TICKS_PER_SECOND / ticksSkipped.
+        set lastV to ship:verticalspeed.
+        set ticksSkipped to 0.
+        printAt("observed vAcc: " + round(vAcc, 2) + "    ", 0, TERMINAL_OTHER + 1).
     }
-    
-    // Print interpolated ELA for debugging
-    printAt("interpolated ELA:      " + round(interpolatedELA, 2) + "     ", 0, 16).
-    // dELAPerTick is an estimate for the error
-    printAt("dELAPerTick:           " + round(dELAPerTick, 2) + "     ", 0, 17).
-
-    printAt("LHS:                   " + round(interpolatedELA + throttleDelayDistance, 2) + "     ", 0, 19).
-    printAt("RHS:                   " + round(dELA + dELAPerTick/2, 2) + "     ", 0, 20).
     preserve.
 }
 
-// Setup start burn trigger (wait until we have an actual interpolated ELA)
-when canInterpolate then {
-    // Start the burn when the interpolated ELA is less than the throttle delay distance and nearest to an interval of dELAPerTick
-    when interpolatedELA + throttleDelayDistance <= dELA + dELAPerTick/2 then {
+
+// Register trigger to initiate the landing burn at the correct altitude.
+// The trigger takes into account:
+// - the three-tick delay between the throttle being set
+//   and the acceleration changing 
+// - the interpolation between the current and previous burn altitude
+// - that the interpolated burn altitude is from the previous tick
+// - that the ship altitude can be slightly above the burn altitude,
+//   so we should check in a range of dAlt around the burn altitude
+lock throttleDelayDistance to v0 * THROTTLE_DELAY_TICKS * 1/TICKS_PER_SECOND.
+//set canInterpolate to false.
+//when canInterpolate then {
+    when ship:verticalspeed < 0 and ship:status = "flying"
+        and groundAltitude + throttleDelayDistance <= burnAltitude then {
         set isBurnStarted to true.
-        lock throttle to 0.8.
-            printAt("Burn started.", 0, 22).
-            printAt("interpolated ELA:      " + round(interpolatedELA, 2) + "     ", 0, 23).
-            printAt("throttleDelayDistance: " + round(throttleDelayDistance, 2) + "     ", 0, 24).
-            printAt("dELA:                  " + round(dELA, 2) + "     ", 0, 25).
-            printAt("dELAPerTick:           " + round(dELAPerTick, 2) + "     ", 0, 26).
-            
-            printAt("LHS:                   " + round(interpolatedELA + throttleDelayDistance, 2) + "     ", 0, 27).
-            printAt("RHS:                   " + round(dELA + dELAPerTick/2, 2) + "     ", 0, 28).
-            // difference between LHS and RHS is the error
-            printAt("error:                 " + round(interpolatedELA + throttleDelayDistance - (dELA + dELAPerTick/2), 2) + "     ", 0, 29).
-        }
-}
-
-function getMeanFe {
-    parameter t. // throttle
-    set s to ship:altitude.
-    set zenith to vectorangle(ship:up:forevector, ship:facing:forevector).
-    set verticalThrustModifier to cos(zenith).
-    set FeSum to 0.
-    for i in range(FE_SAMPLE_COUNT) {
-        set altToCheck to i * s/(FE_SAMPLE_COUNT-1). // evenly spaced (including 0 and s)
-        set FeSum to FeSum + ship:availableThrustAt(
-            body:atm:altitudePressure(altToCheck)
-        ) * t * verticalThrustModifier.
+        //lock pidOffset to
+        //    PID:update(time:seconds, groundAltitude - interpBurnAltitude).
+        //lock throttle to BURN_THROTTLE + pidOffset.
+        lock throttle to BURN_THROTTLE.
+        local error is groundAltitude - burnAltitude.
+        printAt("burn started. error: " + error, 0, 0).
     }
-    return FeSum / FE_SAMPLE_COUNT.
-}
+//}
 
-function getMeanG {
-    set s to ship:altitude.
-    // return average of ground level g and current g
-    //return (body:mu / body:radius^2 + body:mu / (body:radius + s)^2) / 2.
+
+// Interpolation trigger. Runs every tick and interpolates between the current
+// and previous burn altitude to determine the tick at which to start the burn.
+set oldAlt to burnAltitude.
+set ticksPerUpdate to 0.
+set dAlt to 0.
+set dAltPerTick to 0.
+set ticksSinceUpdate to 0.
+set diff to 0. // temp
+when true then {
+    set newAlt to burnAltitude.
     
-    set s to ship:altitude.
-    set gSum to 0.
-    for i in range(G_SAMPLE_COUNT) {
-        set altToCheck to i * s/(G_SAMPLE_COUNT-1). // evenly spaced (including 0 and s)
-        set gAtAlt to body:mu / (body:radius + altToCheck)^2.
-        set gSum to gSum + gAtAlt.
+    if oldAlt = newAlt {
+        // no new burn alt value, interpolate
+        set ticksSinceUpdate to ticksSinceUpdate + 1.
+        if canInterpolate {
+            set dAltPerTick to
+                choose dAlt / ticksPerUpdate
+                if ticksPerUpdate <> 0
+                else 0.
+            set interpBurnAltitude to oldAlt - dAltPerTick * ticksSinceUpdate.
+        }
+    } else {
+        // burn alt value updated
+        if not canInterpolate and dAlt <> 0 {
+            // newAlt is now our second known value,
+            // so we know how much to interpolate by
+            set canInterpolate to true.
+        }
+        set dAlt to oldAlt - newAlt.
+        set interpBurnAltitude to newAlt.
+        set ticksPerUpdate to ticksSinceUpdate.
+        set ticksSinceUpdate to 0.
+        set oldAlt to newAlt.
     }
-    return gSum / G_SAMPLE_COUNT.
+    
+    // Override groundAltitude and interpBurnAltitude printed in the main loop.
+    printAt("altitude:             " + round(groundAltitude, 2), 0, TERMINAL_VARS).
+    printAt("interp burn altitude: " + round(interpBurnAltitude, 2), 0, TERMINAL_VARS + 2).
+    printAt("diff: " + round(diff, 3), 0, TERMINAL_OTHER).
+    
+    //logVariables(lexicon(
+    //    "altitude", groundAltitude,
+    //    "burn altitude", burnAltitude,
+    //    "interp burn altitude", interpBurnAltitude
+    //)).
+    
+    preserve.
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+// Main loop
+////////////////////////////////////////////////////////////////////////////////
 set tickStartTime to time:seconds.
-until ship:status = "landed" {
+until (isBurnStarted and ship:verticalspeed >= 0) or ship:status = "landed" {
     // Print tick duration keep track of loop performance
     printAt("last tick took " 
         + round((time:seconds - tickStartTime) / (1/TICKS_PER_SECOND)) 
         + " ticks (" + round(time:seconds - tickStartTime, 2) + "s)      ",
-        0, 35).
+        0, TERMINAL_LAST).
     set tickStartTime to time:seconds.
-    
-    // Current position
-    set s0 to SHIP_BOUNDS:bottomaltradar.
-    // Current velocity
-    set v0 to ship:verticalspeed.
-    if not isBurnStarted {
-        // Mean acceleration estimated for the duration of the burn
-        set meanFe to getMeanFe(BURN_THROTTLE). // engine will produce less thrust as we descend
-        set meanG to getMeanG().                // gravity will increase as we descend
-        set meanFz to meanG * ship:mass.        // TODO: estimate mass loss
-        set meanFres to meanFe - meanFz.        // TODO: estimate drag
-        set meanVAcc to meanFres / ship:mass.   // acceleration will decrease as we descend
-        // s = s0 + v0*t + 1/2*a*t^2
-        //   = s0 - v0^2 / (2*a)
-        set meanELA to s0 - (v0^2) / (2*meanVAcc).
-        set throttleDelayDistance to
-            v0 * THROTTLE_DELAY_TICKS * 1/TICKS_PER_SECOND.
-    } else {
-        // The same as the above, but Fe is based on current thrust,
-        // and there is no throttle delay
-        set meanFe to getMeanFe(throttle).
-        set meanG to getMeanG().
-        set meanFz to meanG * ship:mass.
-        set meanFres to meanFe - meanFz.
-        set meanVAcc to meanFres / ship:mass.
-        set meanELA to s0 - (v0^2) / (2*meanVAcc).
-    }
-    
-    // Print program variables for debugging
-    printAt("isBurnStarted:         " + isBurnStarted + " ", 0, 11).
-    printAt("altitude:              " + round(s0, 2) + "        ", 0, 12).
-    printAt("vertical speed:        " + round(v0, 2) + "        ", 0, 13).
-    
-    printAt("ELA:                   " + round(meanELA, 2) + "  ", 0, 15).
-    
-    // Log variables for debugging
-    if doLog {
-        log time:seconds
-            + "," + s0
-            + "," + v0
-            + "," + meanVAcc
-            + "," + Fe
-            + "," + meanFe
-            + "," + g
-            + "," + meanG
-            + "," + Fz
-            + "," + meanFz
-            + "," + Fres
-            + "," + meanFres
-            + "," + meanELA
-            + "," + throttleDelayDistance
-            + "," + throttle
-            + "," + isBurnStarted
-        to LOG_PATH.
-    }
-    
-    wait 0.
+
+    //if not isBurnStarted {
+        // The free-fall phase. We repeatedly calculate the altitude at
+        // which to start the landing burn.
+        set burnAltitude to calculateBurnAltitude().
+        
+        printVariables(lexicon(
+            "altitude", groundAltitude,
+            "burn altitude", burnAltitude,
+            //"interp burn altitude", interpBurnAltitude,
+            "s0", s0,
+            "v0", v0,
+            "ag", ag,
+            "ab", ab,
+            "tburn", tburn,
+            "sburn", sburn
+        )).
+        
+        logVariables(lexicon(
+            "altitude", groundAltitude,
+            "burn altitude", burnAltitude
+            //"interp burn altitude", interpBurnAltitude
+        )).
+    //} else {
+    //    // The landing burn phase. We repeatedly calculate the expected
+    //    // landing altitude, and adjust the throttle with a PID controller.
+    //    set burnAltitude to calculateExpectedLandingAltitude().
+        
+    //    printVariables(lexicon(
+    //        "altitude", groundAltitude,
+    //        "burn altitude", burnAltitude,
+    //        "interp burn altitude", interpBurnAltitude,
+    //        "s0", s0,
+    //        "v0", v0,
+    //        "ag", ag,
+    //        "Fe", Fe,
+    //        "ab", ab,
+    //        "ELA", expectedLandingAltitude
+    //    )).
+    //}
 }
 
-set doLog to false.
+lock throttle to 0.
 
 
+////////////////////////////////////////////////////////////////////////////////
+// Functions
+////////////////////////////////////////////////////////////////////////////////
 
-// DEBUGGING
+// Calculates the altitude at which to start the landing burn.
+// The following effects are taken into account:
+// - Engine output decreases at lower altitudes
+// - Gravity increases at lower altitudes
+// The following effects are not yet taken into account:
+// - Atmospheric drag
+// - Mass lowers as fuel is burned
+function calculateBurnAltitude {
+    set s0 to groundAltitude.
+    set v0 to ship:verticalspeed.
+    set ag to -(body:mu / (body:radius)^2). // TODO: make function of altitude
+    set Fe to ship:availablethrust * BURN_THROTTLE.
+    set ab to (Fe / ship:mass) + ag.
+    set abcA to (ag*ab - ag^2)/(2*ab).
+    set abcB to v0 - ag/ab * v0.
+    set abcC to s0 - v0^2/(2*ab).
+    set abcD to max(abcB^2 - 4*abcA*abcC, 0).
+    set tburn to (-abcB - sqrt(abcD))/(2*abcA).
+    set sburn to s0 + v0*tburn + 1/2*ag*tburn^2.
+    return sburn.
+}
 
-//lock steering to up.
-//wait 1.
-//lock throttle to 1.
-//when ship:altitude > 20000 then {
-//    lock throttle to 0.
-//}
-//until false {
-//    wait 0.
-//}
+
+// Calculates the expected landing altitude.
+// TODO: maybe use this instead of the function above, because it's faster?
+function calculateExpectedLandingAltitude {
+    set s0 to groundAltitude.
+    set v0 to ship:verticalspeed.
+    set ag to -(body:mu / (body:radius)^2). // TODO: make function of altitude
+    set Fe to ship:availablethrust * BURN_THROTTLE.
+    set ab to (Fe / ship:mass) + ag.
+    set expectedLandingAltitude to s0 - v0^2/(2*ab).
+    return expectedLandingAltitude.
+}
+
+
+// Prints the given variables to the output terminal.
+// vars: Lexicon of variables to print, consisting of variable name and value.
+function printVariables {
+    parameter vars. // Lexicon of variables to print
+    
+    set numberOfVars to vars:length.
+    
+    // Determine the length of the longest variable name.
+    set maxVarLength to 0.
+    for var in vars:keys {
+        set varLength to var:tostring:length.
+        if varLength > maxVarLength {
+            set maxVarLength to varLength.
+        }
+    }
+    
+    from {local i is 0.} until i = vars:length step {set i to i + 1.} do {
+        set varName to vars:keys[i].
+        set var to vars[varName].
+        printAt(
+            (varName + ": "):padright(maxVarLength + 2)
+            + (choose round(var, 2) if var:istype("Scalar") else var) + "    ",
+            0, TERMINAL_VARS + i
+        ).
+    }
+}
+
+
+// Logs the given variables to the log file.
+// vars: Lexicon of variables to log, consisting of variable name and value.
+function logVariables {
+    parameter vars. // Lexicon of variables to log
+    if not wroteHeader {
+        log ("time," + vars:keys:join(",")) to LOG_PATH.
+        set wroteHeader to true.
+    }
+    log (time:seconds - START_TIME) + "," + vars:values:join(",") to LOG_PATH.
+}
