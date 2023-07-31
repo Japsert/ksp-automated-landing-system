@@ -4,7 +4,8 @@ clearVecDraws().
 
 global VAR_LINE is 10.
 // Interval between steps in seconds.
-global TIME_INTERVAL is .5.
+global TIME_INTERVAL is 1.
+global MAX_ITERATIONS is 30.
 
 // XYZ vectors relative to the center of the body
 //vecDraw(v(0,0,0), v(10,0,0), red, "body X", 1, true).
@@ -26,14 +27,33 @@ vecDraw(v(0,0,0), { return verticalVelVec. }, white, "vertical", 1, true).
 vecDraw(v(0,0,0), { return horizontalVelVec. }, white, "horizontal", 1, true).
 
 local drawnImpactVector is vecdraw().
+local drawnTrajectoryVectors is list().
+local poss is list().
+local alts is list().
+local impactFound is false.
+
+for i in range(0, MAX_ITERATIONS) {
+    local i_ is i.
+    drawnTrajectoryVectors:add(vecdraw(
+        {
+            return choose v(0,0,0) if i_ >= poss:length-1 or not impactFound else
+                poss[i_]:altitudeposition(alts[i_]).
+        },
+        { 
+            return choose v(0,0,0) if i_ >= poss:length-1 or not impactFound else
+                poss[i_+1]:altitudeposition(alts[i_+1]) - poss[i_]:altitudeposition(alts[i_]).
+        },
+        white, i_, 1, true
+    )).
+}
 
 // Every tick, predicts the coordinates of impact (using time intervals of 1s).
 until false {
     local startTime is time:seconds.
     // visualization
     local iterationCount is 0.
-    local poss is list().
-    local alts is list().
+    set poss to list().
+    set alts to list().
     
     // loop variables
     local newPos is ship:geoposition.
@@ -41,7 +61,7 @@ until false {
     local horizontalVelocity is ship:groundspeed.
     local newVerticalVelocity is ship:verticalspeed.
     local normalHorizontalVelVec is horizontalVelVec:normalized. // constant throughout
-    until newAlt <= newPos:terrainheight {
+    until newAlt <= newPos:terrainheight or iterationCount > MAX_ITERATIONS {
         // visualization
         set iterationCount to iterationCount + 1.
         poss:add(newPos).
@@ -62,24 +82,19 @@ until false {
         set newPos to body:geopositionof(newPos:position + newTotalVector).
         set newAlt to newAlt + newVerticalDistance.
     }
-    printAt("impact pos " + round(newPos:lat, 2) + ", " + round(newPos:lng, 2)
-        + ", alt " + round(newAlt, 2) + "  ", 0, 10).
-    // print every iteration's position and altitude
-    //for i in range(0, poss:length) {
-    //    printAt(
-    //        "pos " + round(poss[i]:lat, 2) + ", " + round(poss[i]:lng, 2)
-    //        + ", alt " + round(alts[i], 2) + "  ",
-    //        0, 11 + i
-    //    ).
-    //}
-    // draw vector from ship to impact point
-    set drawnImpactVector to vecDraw(
-        ship:position, newPos:altitudeposition(newAlt),
-        red, "impact", 1, true
-    ).
-    printAt("iterations until impact: " + iterationCount + "  ", 0, 0).
+    set impactFound to not (iterationCount > MAX_ITERATIONS).
+    if impactFound {
+        printAt("iterations until impact: " + iterationCount + "  ", 0, 10).
+        printAt("impact pos " + round(newPos:lat, 2) + ", " + round(newPos:lng, 2)
+        + ", alt " + round(newAlt, 2) + "  ", 0, 11).
+        // draw vector from ship to impact point
+        set drawnImpactVector to vecDraw(
+            ship:position, newPos:altitudeposition(newAlt),
+            red, "impact", 1, true
+        ).
+    }
     
-    printAt("iteration took " + round(time:seconds - startTime, 2) + "ms   ", 0, 30).
+    printAt("iteration took " + round(time:seconds - startTime, 2) + "ms   ", 0, 12).
     
     wait 0.
 }
