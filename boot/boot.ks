@@ -1,10 +1,12 @@
 wait until ship:unpacked.
 clearscreen.
-print "Boot file ran!".
 
-copyPath("0:/boot/lb", "").
-copyPath("0:/boot/lbm", "").
-copyPath("0:/boot/pid", "").
-copyPath("0:/boot/hop", "").
-copyPath("0:/boot/test", "").
-copyPath("0:/boot/imp", "").
+cd("0:/boot/").
+list files in bootFiles.
+for file in bootFiles {
+    if file:isFile and file:name <> "boot.ks" {
+        copyPath("0:/boot/" + file:name, "1:/").
+    }
+}
+
+core:doevent("Open Terminal").
