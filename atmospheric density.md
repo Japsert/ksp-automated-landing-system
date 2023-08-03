@@ -27,6 +27,6 @@ The plan is to calculate $C_d \cdot A$. We have:
     I'm going to implement both methods and see how they compare.
 - $v$: `ship:groundspeed`. TODO: compare to `ship:velocity:surface:mag`.
 
-With these values, we will get values for $C_d \cdot A$ throughout the atmosphere. If we assume the surface area $A$ is constant, we can plot $C_d$ as a function of altitude. The resulting function will apparently look like its real life counterpart; decreasing as the altitude decreases, with a spike at Mach 1.
+With these values, we will get values for $C_d \cdot A$ throughout the atmosphere. If we assume the surface area $A$ is constant, we can plot $C_d$ as a function of altitude and velocity, in a 3D surface plot. The resulting plot will apparently look like its real life counterpart; decreasing as the altitude decreases, with a spike at Mach 1.
 
-I'll create a script that launches a rocket to a certain altitude, and then plots $C_d$ as a function of altitude. I don't know to what altitude I should launch, so I'll just launch to different altitudes and see how it influences the plot.
+I'll have to launch to a number of altitudes to get enough values for the velocity. I'll see through trial and error which altitudes I'll launch to.
