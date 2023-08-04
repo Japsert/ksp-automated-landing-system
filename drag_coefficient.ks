@@ -15,11 +15,20 @@ print("AP reached " + AP + ", waiting until we hit the atmosphere.").
 // Wait until we hit the atmosphere
 wait until altitude <= 70000 and verticalSpeed < 0.
 clearScreen.
+lock steering to srfRetrograde.
 
 // Measure the drag force and atmospheric density each tick, and calculate
 // Cd * A using those values.
-
+local prevVelocityTime is time:seconds.
+local prevVelocityV is ship:verticalSpeed.
+local prevVelocityH is ship:groundspeed.
 until false {
+        
+    set prevVelocityTime to time:seconds.
+    set prevVelocityV to ship:verticalspeed.
+    set prevVelocityH to ship:groundspeed.
+
+    wait 0.
     
     // Drag force
     // To calculate the drag force, we can calculate the expected velocity in
@@ -27,13 +36,21 @@ until false {
     // other than drag), and then take the difference between the expected
     // velocity and the actual velocity.
     
-    // get velocity from previous tick
+    // get velocity from previous tick: prevHVelocity/prevVVelocity
     // apply gravity to vertical velocity
-    // calculate expected velocity
+    local gravAcc is (body:mu)/(body:radius + ship:altitude)^2.
+    local dTime is time:seconds - prevVelocityTime.
+    local expectedVelocityV is prevVelocityV + gravAcc * dTime.
+    local expectedVelocityH is prevVelocityH.
+    // calculate expected velocity using Pythagorean theorem
+    local expectedVelocity is sqrt(expectedVelocityV^2 + expectedVelocityH^2).
     // compare expected velocity with velocity in current tick
-    // calculate drag acceleration
-    // calculate drag force
-    local FD is 0.
+    local currentVelocity is ship:velocity:surface:mag.
+    local velocityDifference is expectedVelocity - currentVelocity.
+    // calculate drag acceleration: a = dv/dt
+    local dragAcc is velocityDifference / dTime.
+    // calculate drag force: F = ma
+    local dragForce is dragAcc * ship:mass.
     
     // Atmospheric density
     // To calculate the atmospheric density, we can use the method of dynamic
@@ -51,17 +68,25 @@ until false {
     
     // TODO: this will result in NaN being pushed onto the stack
     // (likely) due to either atmDensity or sqrVelocity being 0.
-    local CdA is (2 * FD)/(atmDensity * sqrVelocity).
+    if atmDensity = 0 or sqrVelocity = 0 {
+        print(atmDensity + " " + sqrVelocity).
+    }
+    local CdA is (2 * dragForce)/(atmDensity * sqrVelocity).
     // TODO: simplify; remove sqrVelocity (from atmDensity as well)
     // and the factor of 2, so we end up with Cd * A = FD / Q ???
     
     // Print results for this tick
     printVariables(list(
+        list("grav acc", gravAcc, "m/s²"),
+        list("dTime", dTime, "s"),
+        list("exp. vel.", expectedVelocity, "m/s"),
+        list("cur. vel.", currentVelocity, "m/s"),
+        list("vel. diff.", velocityDifference, "m/s"),
+        list("drag acc.", dragAcc, "m/s²"),
+        list("drag force", dragForce, "N"),
         list("atm. density", atmDensity, "kg/m³"),
         list("Cd * A", CdA, "m²")
     )).
-    
-    wait 0.
 }
 
 function printVariables {
