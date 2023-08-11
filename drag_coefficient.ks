@@ -12,21 +12,19 @@ wait until apoapsis >= AP.
 lock throttle to 0.
 clearScreen.
 print("AP reached " + AP + ", waiting until we hit the atmosphere.").
+wait until altitude <= 80000 and verticalSpeed < 0.
+lock steering to srfRetrograde.
 // Wait until we hit the atmosphere
 wait until altitude <= 70000 and verticalSpeed < 0.
 clearScreen.
-lock steering to srfRetrograde.
 
 // Measure the drag force and atmospheric density each tick, and calculate
 // Cd * A using those values.
-local prevVelocityTime is time:seconds.
-local prevVelocityV is ship:verticalSpeed.
-local prevVelocityH is ship:groundspeed.
 until false {
         
-    set prevVelocityTime to time:seconds.
-    set prevVelocityV to ship:verticalspeed.
-    set prevVelocityH to ship:groundspeed.
+    local prevVelocityTime is time:seconds.
+    local prevVelH is ship:groundSpeed.
+    local prevVelV is ship:verticalSpeed.
 
     wait 0.
     
@@ -38,19 +36,27 @@ until false {
     
     // get velocity from previous tick: prevHVelocity/prevVVelocity
     // apply gravity to vertical velocity
-    local gravAcc is (body:mu)/(body:radius + ship:altitude)^2.
+    // horizontal velocity is a function of altitude due to the Coriolis effect
+    local g is (body:mu)/(body:radius + ship:altitude)^2.
+    local gravAcc is -g.
     local dTime is time:seconds - prevVelocityTime.
-    local expectedVelocityV is prevVelocityV + gravAcc * dTime.
-    local expectedVelocityH is prevVelocityH.
-    // calculate expected velocity using Pythagorean theorem
-    local expectedVelocity is sqrt(expectedVelocityV^2 + expectedVelocityH^2).
-    // compare expected velocity with velocity in current tick
-    local currentVelocity is ship:velocity:surface:mag.
-    local velocityDifference is expectedVelocity - currentVelocity.
+    local expectedVelH is getExpectedVelH(ship:altitude).
+    local expectedVelV is prevVelV + gravAcc * dTime.
+    // get velocity from current tick
+    local currentVelH is ship:groundSpeed.
+    local currentVelV is ship:verticalSpeed.
+    // compare expected horizontal/vertical velocity with current
+    local velDiffH is currentVelH - expectedVelH.
+    local velDiffV is currentVelV - expectedVelV.
+    // DEBUG: ratio between velDiffV/H, rough indicator of accuracy
+    local velDiffRatio is velDiffV/(abs(velDiffH)+velDiffV).
+    // calculate drag velocity using Pythagorean theorem
+    local dragVel is choose -sqrt(velDiffH^2 + velDiffV^2)
+        if velDiffV < 0 else sqrt(velDiffH^2 + velDiffV^2).
     // calculate drag acceleration: a = dv/dt
-    local dragAcc is velocityDifference / dTime.
+    local dragAcc is dragVel / dTime.
     // calculate drag force: F = ma
-    local dragForce is dragAcc * ship:mass.
+    local dragForce is dragAcc * ship:mass * 1000. // why *1000?
     
     // Atmospheric density
     // To calculate the atmospheric density, we can use the method of dynamic
@@ -77,16 +83,33 @@ until false {
     
     // Print results for this tick
     printVariables(list(
+        list("prev vel H", prevVelH, "m/s"),
+        list("prev vel V", prevVelV, "m/s"),
         list("grav acc", gravAcc, "m/s²"),
         list("dTime", dTime, "s"),
-        list("exp. vel.", expectedVelocity, "m/s"),
-        list("cur. vel.", currentVelocity, "m/s"),
-        list("vel. diff.", velocityDifference, "m/s"),
-        list("drag acc.", dragAcc, "m/s²"),
-        list("drag force", dragForce, "N"),
+        list("exp vel H", expectedVelH, "m/s"),
+        list("exp vel V", expectedVelV, "m/s"),
+        list("cur vel H", currentVelH, "m/s"),
+        list("cur vel V", currentVelV, "m/s"),
+        list("vel diff H", velDiffH, "m/s"),
+        list("vel diff V", velDiffV, "m/s"),
+        list("vel diff ratio", velDiffRatio*100, "%"),
+        list("drag vel", dragVel, "m/s"),
+        list("drag acc", dragAcc, "m/s²"),
+        list("drag force", dragForce/1000, "kN"),
         list("atm. density", atmDensity, "kg/m³"),
         list("Cd * A", CdA, "m²")
     )).
+}
+
+function getExpectedVelH {
+    local parameter alt_.
+    local coeffs is lexicon(
+        "x^2", -3.998339e-10,
+        "x^1", 5.804223e-4,
+        "x^0", -9.524015e-3
+    ).
+    return coeffs["x^2"] * alt_^2 + coeffs["x^1"] * alt_ + coeffs["x^0"].
 }
 
 function printVariables {
