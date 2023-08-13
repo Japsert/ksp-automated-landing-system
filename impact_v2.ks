@@ -1,9 +1,82 @@
 @lazyGlobal off.
+clearVecDraws().
+
 
 // Constants
-global ATM_TO_PA is constant:atmToKPa * 1000.
 global DELTA_TIME is 1.
-global MAX_ITERATIONS is 50.
+global MAX_ITERATIONS is 100.
+global DEBUG_LINE is 10.
+global VAR_LINE is 20.
+
+// DEBUG
+global drawOneTraj is false.
+when terminal:input:hasChar then {
+    if terminal:input:getChar() = "w" {
+        set drawOneTraj to true.
+    }
+    preserve.
+}
+
+
+//Initial sub-orbital burn to plot impact position over time
+//clearScreen. print "Burning until apoapsis >= 50 km...".
+//if shouldStage() stage.
+//lock throttle to 1.
+//lock steering to heading(90, 80, 270).
+//when ship:verticalSpeed >= 5 then legs off. 
+//wait until ship:verticalSpeed >= 50.
+//lock steering to srfPrograde. // gravity turn
+//wait until ship:apoapsis >= 50000.
+//clearScreen. print"Apoapsis reached 50 km, stopping burn and setting SAS to surface retrograde.".
+//lock throttle to 0.
+//lock steering to srfRetrograde.
+//wait 3. // wait for ship to turn around
+
+// Now coasting until impact. Calculate impact position every tick
+local drawnImpactVector is false.
+clearScreen.
+until false {
+    local impact is getImpactPos(
+        ship:geoPosition, ship:altitude, ship:velocity:surface
+    ).
+    
+    if impact:isFound {
+        local impactPos is impact:position.
+        local impactAlt is impact:altitude.
+        local iterations is impact:iterations.
+        // DEBUG: draw vector to impact position
+        set drawnImpactVector to vecDraw(
+            ship:position, impactPos:altitudePosition(impactAlt),
+            red, "impact", 1, true
+        ).
+        // DEBUG: print impact lat, lng and alt
+        print "Impact found in " + iterations + "/" + MAX_ITERATIONS + " iterations!    " at (0, DEBUG_LINE).
+        print "lat: " + impactPos:lat + "    " at (0, DEBUG_LINE+1).
+        print "lng: " + impactPos:lng + "    " at (0, DEBUG_LINE+2).
+        print "alt: " + impactAlt + "    " at (0, DEBUG_LINE+3).
+    } else {
+        // DEBUG: remove impact vector and print that no impact was found
+        set drawnImpactVector to vecDraw().
+        print "No impact found in " + MAX_ITERATIONS + " iterations.    " at (0, DEBUG_LINE).
+        print "                                  " at (0, DEBUG_LINE+1).
+        print "                                  " at (0, DEBUG_LINE+2).
+        print "                                  " at (0, DEBUG_LINE+3).
+    }
+    wait 0.
+}
+
+
+// Checks if we should stage to be able to burn.
+// Returns true if there is an ignited engine, false if not.
+function shouldStage {
+    local engines is list().
+    list engines in engines.
+    for engine in engines {
+        if engine:ignition return false.
+    }
+    return true.
+}
+
 
 function getImpactPos {
     // Initial values
@@ -27,13 +100,14 @@ function getImpactPos {
         
         // Gravity vector
         local g is body:mu / (body:radius + prevAlt)^2.
-        local gForceVec is g * -ship:up:vector.
+        local gravForce is g * ship:mass. // kN
+        local gravForceVec is gravForce * -ship:up:vector.
         
         // Drag vector
         local dynamicPressureAtm is ship:dynamicPressure.
         local sqrVelocity is ship:velocity:surface:sqrMagnitude.
         local atmDensity is (2 * dynamicPressureAtm) / sqrVelocity.
-        local atmDensityPa is atmDensity * ATM_TO_PA.
+        local atmDensityKPa is atmDensity * constant:atmToKPa.
         
         local vel is velVec:mag.
         
@@ -43,11 +117,11 @@ function getImpactPos {
         local machNumber is vel / speedOfSound.
         local CdA is getCdA(machNumber).
         
-        local dragForce is 1/2 * atmDensityPa * sqrVelocity * CdA. // N
+        local dragForce is 1/2 * atmDensityKPa * sqrVelocity * CdA. // kN
         local dragForceVec is dragForce * -velVec:normalized.
         
         // Total force vector
-        local totalForceVec is gForceVec + dragForceVec.
+        local totalForceVec is gravForceVec + dragForceVec. // kN
         
         // Acceleration vector
         local accVec is totalForceVec / ship:mass. // Constant mass, no burn yet
@@ -57,21 +131,30 @@ function getImpactPos {
         
         // Update position, accounting for curvature of the planet
         local positionChangeVec is velVec * DELTA_TIME.
-        set pos to body:geoPositionOf(pos:position + positionChangeVec).
-        set alt_ to body:altitudeOf(pos:position + positionChangeVec).
+        //if drawOneTraj vecDraw(prevPos:altitudePosition(prevAlt), positionChangeVec, magenta, "pos", 1, true). // DEBUG
+        local vecToNewPos is prevPos:altitudePosition(prevAlt) + positionChangeVec.
+        set pos to body:geoPositionOf(vecToNewPos).
+        set alt_ to body:altitudeOf(vecToNewPos).
+        if drawOneTraj vecDraw(ship:position, posNoRotation:altitudePosition(alt_), green, "pos", 1, true). // DEBUG
+        if drawOneTraj vecDraw(ship:position, pos:altitudePosition(alt_), cyan, "pos", 1, true). // DEBUG
         
+        // DEBUG
+        //print "i " + i + " lat " + round(pos:lat, 3) + " lng " + round(pos:lng, 3) + " alt " + round(alt_, 2) at (0, VAR_LINE+i).
         
         // Check if we have impacted
-        if alt_ <= pos:terrainHeight {
+        local posImpactHeight is max(pos:terrainHeight, 0).
+        if alt_ <= posImpactHeight {
             set reachedGround to true.
             // Interpolate between pos and prevPos to find precise landing pos
-            local ratio is prevAlt / (prevAlt + alt_).
+            local prevPosImpactHeight is max(prevPos:terrainHeight, 0).
+            local averageImpactHeight is (posImpactHeight + prevPosImpactHeight) / 2.
+            local altRatio is (prevAlt - averageImpactHeight) / (prevAlt - alt_).
             local interpolatedPos is latLng(
-                prevPos:lat + (pos:lat - prevPos:lat) * ratio,
-                prevPos:lng + (pos:lng - prevPos:lng) * ratio
+                prevPos:lat + (pos:lat - prevPos:lat) * altRatio,
+                prevPos:lng + (pos:lng - prevPos:lng) * altRatio
             ).
             set impactPos to interpolatedPos.
-            set impactAlt to impactPos:terrainheight.
+            set impactAlt to max(impactPos:terrainHeight, 0).
         }
         
         
@@ -80,7 +163,14 @@ function getImpactPos {
         if i >= MAX_ITERATIONS set maxIterationsReached to true.
     }
     
-    return list(impactPos, impactAlt).
+    set drawOneTraj to false. // DEBUG
+    
+    return lexicon(
+        "isFound", reachedGround,
+        "position", impactPos,
+        "altitude", impactAlt,
+        "iterations", i
+    ).
 }
 
 function getCdA {
@@ -176,4 +266,29 @@ function getCdA {
         }
     }
     return 0.0.
+}
+
+
+/// DEBUG: helper function
+function printVars {
+    local parameter vars. // lexicon
+    
+    // Determine the length of the longest variable name.
+    local maxVarLength is 0.
+    for var in vars:keys {
+        local varLength is var:tostring:length.
+        if varLength > maxVarLength {
+            set maxVarLength to varLength.
+        }
+    }
+    
+    from {local i is 0.} until i = vars:length step {set i to i + 1.} do {
+        local varName is vars:keys[i].
+        local var is vars[varName].
+        printAt(
+            (varName + ": "):padright(maxVarLength + 2)
+            + var + "    ",
+            0, VAR_LINE + i
+        ).
+    }
 }
