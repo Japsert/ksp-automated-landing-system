@@ -17,7 +17,7 @@ function getImpactPos {
     local velVec is initialVelVec.
     
     local i is 0.
-    local reachedGroud is false, maxIterationsReached is false.
+    local reachedGround is false, maxIterationsReached is false.
     local impactPos is false, impactAlt is false.
     until reachedGround or maxIterationsReached {
         // Save previous values for interpolation
@@ -53,7 +53,7 @@ function getImpactPos {
         local accVec is totalForceVec / ship:mass. // Constant mass, no burn yet
         
         // Update velocity
-        set velVec to prevVel + accVec * DELTA_TIME.
+        set velVec to velVec + accVec * DELTA_TIME.
         
         // Update position, accounting for curvature of the planet
         local positionChangeVec is velVec * DELTA_TIME.
