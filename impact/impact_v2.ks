@@ -1,5 +1,9 @@
 @lazyGlobal off.
 clearVecDraws().
+// Logging
+global logPath is "0:/impact/impact.log".
+if exists(logPath) deletePath(logPath).
+log "time,lat,lng" to logPath.
 
 
 // Constants
@@ -26,6 +30,7 @@ wait 3. // wait for ship to turn around
 
 // Now coasting until impact. Calculate impact position every tick
 clearScreen.
+global start is time:seconds.
 until false {
     local impact is getImpactPos(
         ship:geoPosition, ship:altitude, ship:velocity:surface
@@ -44,6 +49,11 @@ until false {
         print "lat: " + impactPos:lat + "    " at (0, DEBUG_LINE+1).
         print "lng: " + impactPos:lng + "    " at (0, DEBUG_LINE+2).
         print "alt: " + impactAlt + "    " at (0, DEBUG_LINE+3).
+        
+        // Logging
+        log list(
+            (time-start):seconds, impactPos:lat, impactPos:lng
+        ):join(",") to logPath.
     } else {
         set drawnImpactVector to vecDraw().
         print "No impact found in " + MAX_ITERATIONS + " iterations.    " at (0, DEBUG_LINE).
@@ -51,6 +61,7 @@ until false {
         print "                                  " at (0, DEBUG_LINE+2).
         print "                                  " at (0, DEBUG_LINE+3).
     }
+    
     wait 0.
 }
 
