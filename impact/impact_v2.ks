@@ -7,55 +7,44 @@ global DELTA_TIME is 1.
 global MAX_ITERATIONS is 100.
 global DEBUG_LINE is 10.
 global VAR_LINE is 20.
-
-// DEBUG
-global drawOneTraj is false.
-when terminal:input:hasChar then {
-    if terminal:input:getChar() = "w" {
-        set drawOneTraj to true.
-    }
-    preserve.
-}
+global drawnImpactVector is vecDraw().
 
 
-//Initial sub-orbital burn to plot impact position over time
-//clearScreen. print "Burning until apoapsis >= 50 km...".
-//if shouldStage() stage.
-//lock throttle to 1.
-//lock steering to heading(90, 80, 270).
-//when ship:verticalSpeed >= 5 then legs off. 
-//wait until ship:verticalSpeed >= 50.
-//lock steering to srfPrograde. // gravity turn
-//wait until ship:apoapsis >= 50000.
-//clearScreen. print"Apoapsis reached 50 km, stopping burn and setting SAS to surface retrograde.".
-//lock throttle to 0.
-//lock steering to srfRetrograde.
-//wait 3. // wait for ship to turn around
+// Initial sub-orbital burn to plot impact position over time
+clearScreen. print "Burning until apoapsis >= 50 km...".
+if shouldStage() stage.
+lock throttle to 1.
+lock steering to heading(90, 80, 270).
+when ship:verticalSpeed >= 5 then legs off. 
+wait until ship:verticalSpeed >= 50.
+lock steering to srfPrograde. // gravity turn
+wait until ship:apoapsis >= 50000.
+clearScreen. print"Apoapsis reached 50 km, stopping burn and setting SAS to surface retrograde.".
+lock throttle to 0.
+lock steering to srfRetrograde.
+wait 3. // wait for ship to turn around
 
 // Now coasting until impact. Calculate impact position every tick
-local drawnImpactVector is false.
 clearScreen.
 until false {
     local impact is getImpactPos(
         ship:geoPosition, ship:altitude, ship:velocity:surface
     ).
     
+    // DEBUG: if impact found, draw vector to impact position and print coords
     if impact:isFound {
         local impactPos is impact:position.
         local impactAlt is impact:altitude.
         local iterations is impact:iterations.
-        // DEBUG: draw vector to impact position
         set drawnImpactVector to vecDraw(
             ship:position, impactPos:altitudePosition(impactAlt),
             red, "impact", 1, true
         ).
-        // DEBUG: print impact lat, lng and alt
         print "Impact found in " + iterations + "/" + MAX_ITERATIONS + " iterations!    " at (0, DEBUG_LINE).
         print "lat: " + impactPos:lat + "    " at (0, DEBUG_LINE+1).
         print "lng: " + impactPos:lng + "    " at (0, DEBUG_LINE+2).
         print "alt: " + impactAlt + "    " at (0, DEBUG_LINE+3).
     } else {
-        // DEBUG: remove impact vector and print that no impact was found
         set drawnImpactVector to vecDraw().
         print "No impact found in " + MAX_ITERATIONS + " iterations.    " at (0, DEBUG_LINE).
         print "                                  " at (0, DEBUG_LINE+1).
@@ -104,7 +93,7 @@ function getImpactPos {
         local gravForceVec is gravForce * -ship:up:vector.
         
         // Drag vector
-        local dynamicPressureAtm is ship:dynamicPressure.
+        local dynamicPressureAtm is ship:dynamicPressure. // TODO: not adjusted during iteration!
         local sqrVelocity is ship:velocity:surface:sqrMagnitude.
         local atmDensity is (2 * dynamicPressureAtm) / sqrVelocity.
         local atmDensityKPa is atmDensity * constant:atmToKPa.
@@ -131,15 +120,9 @@ function getImpactPos {
         
         // Update position, accounting for curvature of the planet
         local positionChangeVec is velVec * DELTA_TIME.
-        //if drawOneTraj vecDraw(prevPos:altitudePosition(prevAlt), positionChangeVec, magenta, "pos", 1, true). // DEBUG
         local vecToNewPos is prevPos:altitudePosition(prevAlt) + positionChangeVec.
         set pos to body:geoPositionOf(vecToNewPos).
         set alt_ to body:altitudeOf(vecToNewPos).
-        if drawOneTraj vecDraw(ship:position, posNoRotation:altitudePosition(alt_), green, "pos", 1, true). // DEBUG
-        if drawOneTraj vecDraw(ship:position, pos:altitudePosition(alt_), cyan, "pos", 1, true). // DEBUG
-        
-        // DEBUG
-        //print "i " + i + " lat " + round(pos:lat, 3) + " lng " + round(pos:lng, 3) + " alt " + round(alt_, 2) at (0, VAR_LINE+i).
         
         // Check if we have impacted
         local posImpactHeight is max(pos:terrainHeight, 0).
@@ -162,8 +145,6 @@ function getImpactPos {
         set i to i + 1.
         if i >= MAX_ITERATIONS set maxIterationsReached to true.
     }
-    
-    set drawOneTraj to false. // DEBUG
     
     return lexicon(
         "isFound", reachedGround,
