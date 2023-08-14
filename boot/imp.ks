@@ -1,1 +1,1 @@
-runPath("0:/impact_v2.ks").
+runPath("0:/impact/impact_v2.ks").

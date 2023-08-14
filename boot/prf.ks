@@ -1,1 +1,1 @@
-runpath("0:/dragprofile/drag_profile.ks").
+runpath("0:/drag/drag_profile.ks").

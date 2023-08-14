@@ -1,1 +1,1 @@
-runpath("0:/landingburn_mass").
+runpath("0:/landingburn/landingburn_mass").
