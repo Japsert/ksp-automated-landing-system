@@ -125,7 +125,7 @@ def update(frame):
             [point[lng_col] for point in run], [point[lat_col] for point in run]
         )
         # plot newest points as red crosses
-        newest_point.set_data(run[-1][lng_col], run[-1][lat_col])
+        newest_point.set_data([run[-1][lng_col]], [run[-1][lat_col]])
 
     ax.set_title(
         f"{sped_up_time:.1f}/{log_time_range:.1f} seconds (sped up {speedup_factor}x)"
