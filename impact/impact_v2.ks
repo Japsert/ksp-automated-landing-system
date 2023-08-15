@@ -1,13 +1,15 @@
 @lazyGlobal off.
 clearVecDraws().
+
+
 // Logging
 global logPath is "0:/impact/impact.log".
-if exists(logPath) deletePath(logPath).
-log "time,lat,lng" to logPath.
+// log file should have "time,lat,lng" on the first line.
+log "---" to logPath. // new run marker
 
 
 // Constants
-global DELTA_TIME is 1.
+global DELTA_TIME is 5.
 global MAX_ITERATIONS is 100.
 global DEBUG_LINE is 10.
 global VAR_LINE is 20.
@@ -96,6 +98,7 @@ function getImpactPos {
         // Save previous values for interpolation
         local prevPos is pos.
         local prevAlt is alt_.
+        local prevVelVec is velVec.
         
         
         // Gravity vector
@@ -104,21 +107,22 @@ function getImpactPos {
         local gravForceVec is gravForce * -ship:up:vector.
         
         // Drag vector
-        local dynamicPressureAtm is ship:dynamicPressure. // TODO: not adjusted during iteration!
-        local sqrVelocity is ship:velocity:surface:sqrMagnitude.
-        local atmDensity is (2 * dynamicPressureAtm) / sqrVelocity.
+        local temperature is lookUpTemp(prevAlt).
+        local staticPressure is body:atm:altitudePressure(prevAlt).
+        local atmDensity is (staticPressure * body:atm:molarMass)
+                                / (constant:idealGas * temperature).
         local atmDensityKPa is atmDensity * constant:atmToKPa.
         
-        local vel is velVec:mag.
+        local sqrVelocity is prevVelVec:sqrMagnitude.
         
-        local staticPressure is body:atm:altitudePressure(prevAlt).
         local bulkModulus is staticPressure * body:atm:adiabaticIndex.
         local speedOfSound is sqrt(bulkModulus / atmDensity).
+        local vel is prevVelVec:mag.
         local machNumber is vel / speedOfSound.
-        local CdA is getCdA(machNumber).
+        local CdA is lookUpCdA(machNumber).
         
         local dragForce is 1/2 * atmDensityKPa * sqrVelocity * CdA. // kN
-        local dragForceVec is dragForce * -velVec:normalized.
+        local dragForceVec is dragForce * -prevVelVec:normalized.
         
         // Total force vector
         local totalForceVec is gravForceVec + dragForceVec. // kN
@@ -134,6 +138,16 @@ function getImpactPos {
         local vecToNewPos is prevPos:altitudePosition(prevAlt) + positionChangeVec.
         set pos to body:geoPositionOf(vecToNewPos).
         set alt_ to body:altitudeOf(vecToNewPos).
+        
+        // DEBUG: print vars
+        if i = 0 printVars(list(
+            list("atm density", atmDensity, "kg/m^3"),
+            list("mach number", machNumber, ""),
+            list("CdA", CdA, "m^2"),
+            list("sqrVelocity", sqrVelocity, "m^2/s^2"),
+            list("drag force", dragForce, "kN")
+        )).
+        
         
         // Check if we have impacted
         local posImpactHeight is max(pos:terrainHeight, 0).
@@ -165,9 +179,120 @@ function getImpactPos {
     ).
 }
 
-function getCdA {
+
+function lookUpTemp {
+    local parameter alt_.
+    
+    if alt_ < 0 {
+        print "ERROR: altitude must be greater than or equal to 0. Returning getTempAtAlt(0)".
+        return lookUpTemp(0).
+    }
+    
+    if not body:atm:exists return 0.
+    if body:atm:exists and body:atm:height < alt_ return 0.
+    
+    local lookupTable is list(
+        lexicon(
+            "start", 0,
+            "end", 8814,
+            "x^3", 2.7706e-11,
+            "x^2", -4.3756e-07,
+            "x^1", -8.1137e-03,
+            "x^0", 309.6642
+        ),
+        lexicon(
+            "start", 8814,
+            "end", 16048,
+            "x^2", 8.6216e-08,
+            "x^1", -3.0887e-03,
+            "x^0", 243.8136
+        ),
+        lexicon(
+            "start", 16048,
+            "end", 25735,
+            "x^1", 1.2399e-03,
+            "x^0", 196.7535
+        ),
+        lexicon(
+            "start", 25735,
+            "end", 37877,
+            "x^3", -4.8140e-12,
+            "x^2", 4.5867e-07,
+            "x^1", -1.0577e-02,
+            "x^0", 279.1508
+        ),
+        lexicon(
+            "start", 37877,
+            "end", 41120,
+            "x^0", 274.9698
+        ),
+        lexicon(
+            "start", 41120,
+            "end", 57439,
+            "x^1", -3.4328e-03,
+            "x^0", 416.1255
+        ),
+        lexicon(
+            "start", 57439,
+            "end", 61412,
+            "x^3", -7.5739e-11,
+            "x^2", 1.3956e-05,
+            "x^1", -8.5603e-01,
+            "x^0", 17697.6256
+        ),
+        lexicon(
+            "start", 61412,
+            "end", 63440,
+            "x^3", -7.5735e-11,
+            "x^2", 1.3955e-05,
+            "x^1", -8.5596e-01,
+            "x^0", 17695.7926
+        ),
+        lexicon(
+            "start", 63440,
+            "end", 68792,
+            "x^3", 2.1427e-11,
+            "x^2", -4.4821e-06,
+            "x^1", 3.1011e-01,
+            "x^0", -6884.9892
+        ),
+        lexicon(
+            "start", 68792,
+            "end", 70000,
+            "x^0", 212.9276
+        )
+    ).
+    
+    for segment in lookupTable {
+        if alt_ >= segment:start and alt_ < segment:end {
+            local returnValue is 0.
+            if segment:hasKey("x^3")
+                set returnValue to returnValue + segment["x^3"] * alt_^3.
+            if segment:hasKey("x^2")
+                set returnValue to returnValue + segment["x^2"] * alt_^2.
+            if segment:hasKey("x^1")
+                set returnValue to returnValue + segment["x^1"] * alt_^1.
+            if segment:hasKey("x^0")
+                set returnValue to returnValue + segment["x^0"].
+            return returnValue.
+        }
+    }
+    print "ERROR: no valid temperature found for altitude " + alt_ + ". Returning 0.0.".
+    return 0.0.
+}
+
+
+function lookUpCdA {
     local parameter machNumber.
-        
+    
+    if machNumber < 0 {
+        print "ERROR: machNumber must be greater than or equal to 0. Returning getCdA(0)".
+        return lookUpCdA(0).
+    }
+    
+    if not body:atm:exists return 0.
+    if body:atm:exists and body:atm:height < ship:altitude return 0.
+    
     local lookupTable is list(
         lexicon(
             "start", 0.0,
@@ -245,42 +370,49 @@ function getCdA {
     
     for segment in lookupTable {
         if machNumber >= segment:start and machNumber < segment:end {
-            if segment:hasKey("x^3") {
-                return segment["x^3"] * machNumber^3
-                     + segment["x^2"] * machNumber^2
-                     + segment["x^1"] * machNumber
-                     + segment["x^0"].
-            } else if segment:hasKey("x^2") {
-                return segment["x^2"] * machNumber^2
-                     + segment["x^1"] * machNumber
-                     + segment["x^0"].
-            }
+            local returnValue is 0.
+            if segment:hasKey("x^3")
+                set returnValue to returnValue + segment["x^3"] * machNumber^3.
+            if segment:hasKey("x^2")
+                set returnValue to returnValue + segment["x^2"] * machNumber^2.
+            if segment:hasKey("x^1")
+                set returnValue to returnValue + segment["x^1"] * machNumber^1.
+            if segment:hasKey("x^0")
+                set returnValue to returnValue + segment["x^0"].
+            return returnValue.
         }
     }
+    print "ERROR: no valid CdA found for machNumber " + machNumber + ". Returning 0.0.".
     return 0.0.
 }
 
 
 /// DEBUG: helper function
 function printVars {
-    local parameter vars. // lexicon
+    local parameter vars. // list of lists
     
-    // Determine the length of the longest variable name.
     local maxVarLength is 0.
-    for var in vars:keys {
-        local varLength is var:tostring:length.
-        if varLength > maxVarLength {
-            set maxVarLength to varLength.
-        }
+    for var in vars {
+        local varName is var[0].
+        set maxVarLength to max(maxVarLength, varName:length).
     }
     
     from {local i is 0.} until i = vars:length step {set i to i + 1.} do {
-        local varName is vars:keys[i].
-        local var is vars[varName].
-        printAt(
+        local var is vars[i].
+        local varName is var[0].
+        local varValue is var[1].
+        local varUnit is var[2].
+        printLn(
             (varName + ": "):padright(maxVarLength + 2)
-            + var + "    ",
-            0, VAR_LINE + i
+            + varValue + " " + varUnit, VAR_LINE + i
         ).
     }
+}
+
+function printLn {
+    local parameter string.
+    local parameter line.
+    
+    set string to string:padright(terminal:width).
+    print string at (0, line).
 }
