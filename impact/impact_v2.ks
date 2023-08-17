@@ -2,33 +2,44 @@
 clearVecDraws().
 
 
-// Logging
+// Logging and debugging
+global doLog is true.
 global logPath is "0:/impact/impact.log".
 // log file should have "time,lat,lng" on the first line.
-log "---" to logPath. // new run marker
+global runName is "no drag (dt=2, instead of 5)".
+if doLog log "--- " + runName to logPath. // new run marker
 
-
-// Constants
-global DELTA_TIME is 5.
-global MAX_ITERATIONS is 100.
 global DEBUG_LINE is 10.
-global VAR_LINE is 20.
+global VAR_LINE is 22.
+
+global errorBuffer is list().
+global ERROR_LINE is 26.
+global errorCount is 0.
+global printErrors is false.
+
 global drawnImpactVector is vecDraw().
 
 
+// Constants
+global DELTA_TIME is 2.
+global MAX_ITERATIONS is 150.
+
+
 // Initial sub-orbital burn to plot impact position over time
-clearScreen. print "Burning until apoapsis >= 50 km...".
-if shouldStage() stage.
-lock throttle to 1.
-lock steering to heading(90, 80, 270).
-when ship:verticalSpeed >= 5 then legs off. 
-wait until ship:verticalSpeed >= 50.
-lock steering to srfPrograde. // gravity turn
-wait until ship:apoapsis >= 50000.
-clearScreen. print"Apoapsis reached 50 km, stopping burn and setting SAS to surface retrograde.".
-lock throttle to 0.
-lock steering to srfRetrograde.
-wait 3. // wait for ship to turn around
+if not (ship:apoapsis > 40000) { // DEBUG
+    clearScreen. print "Burning until apoapsis >= 50 km...".
+    if shouldStage() stage.
+    lock throttle to 1.
+    lock steering to heading(90, 80, 270).
+    when ship:verticalSpeed >= 5 then legs off. 
+    wait until ship:verticalSpeed >= 50.
+    lock steering to srfPrograde. // gravity turn
+    wait until ship:apoapsis >= 50000.
+    clearScreen. print "Apoapsis reached 50 km, stopping burn and setting SAS to surface retrograde.".
+    lock throttle to 0.
+    lock steering to srfRetrograde.
+    wait 5. // wait for ship to turn around
+}
 
 // Now coasting until impact. Calculate impact position every tick
 clearScreen.
@@ -53,7 +64,7 @@ until false {
         print "alt: " + impactAlt + "    " at (0, DEBUG_LINE+3).
         
         // Logging
-        log list(
+        if doLog log list(
             (time-start):seconds, impactPos:lat, impactPos:lng
         ):join(",") to logPath.
     } else {
@@ -180,16 +191,17 @@ function getImpactPos {
 }
 
 
+// Look up the temperature at a given altitude in a lookup table.
 function lookUpTemp {
     local parameter alt_.
     
+    if not body:atm:exists return 0.
+    if alt_ > body:atm:height return 0.
+    
     if alt_ < 0 {
-        print "ERROR: altitude must be greater than or equal to 0. Returning getTempAtAlt(0)".
+        printError("altitude must be greater than or equal to 0. Returning ground temperature.").
         return lookUpTemp(0).
     }
-    
-    if not body:atm:exists return 0.
-    if body:atm:exists and body:atm:height < alt_ return 0.
     
     local lookupTable is list(
         lexicon(
@@ -277,7 +289,7 @@ function lookUpTemp {
             return returnValue.
         }
     }
-    print "ERROR: no valid temperature found for altitude " + alt_ + ". Returning 0.0.".
+    printError("No valid temperature found for altitude " + alt_ + ". Returning 0.0.").
     return 0.0.
 }
 
@@ -285,13 +297,18 @@ function lookUpTemp {
 function lookUpCdA {
     local parameter machNumber.
     
+    if not body:atm:exists return 0.
+    if ship:altitude > body:atm:height return 0.
+    
     if machNumber < 0 {
-        print "ERROR: machNumber must be greater than or equal to 0. Returning getCdA(0)".
+        printError("machNumber < 0! Returning CdA at standstill.").
         return lookUpCdA(0).
     }
     
-    if not body:atm:exists return 0.
-    if body:atm:exists and body:atm:height < ship:altitude return 0.
+    if machNumber >= 6.8 {
+        printError("machNumber >= 6.8! Returning CdA at Mach 6.799.").
+        return lookUpCdA(6.799).
+    }
     
     local lookupTable is list(
         lexicon(
@@ -382,12 +399,12 @@ function lookUpCdA {
             return returnValue.
         }
     }
-    print "ERROR: no valid CdA found for machNumber " + machNumber + ". Returning 0.0.".
+    printError("No valid CdA found for machNumber " + machNumber + ". Returning 0.0.").
     return 0.0.
 }
 
 
-/// DEBUG: helper function
+// DEBUG: helper function
 function printVars {
     local parameter vars. // list of lists
     
@@ -402,17 +419,65 @@ function printVars {
         local varName is var[0].
         local varValue is var[1].
         local varUnit is var[2].
-        printLn(
+        printLine(
             (varName + ": "):padright(maxVarLength + 2)
             + varValue + " " + varUnit, VAR_LINE + i
         ).
     }
 }
 
-function printLn {
+function printLine {
     local parameter string.
     local parameter line.
     
     set string to string:padright(terminal:width).
     print string at (0, line).
+}
+
+
+// DEBUG: helper function
+function printError {
+    local parameter msg.
+    
+    if not printErrors return.
+    
+    local height is terminal:height - 1. // last line is not used?
+    
+    function spaceForNewError {
+        local parameter newError.
+        
+        local i is ERROR_LINE.
+        for error in errorBuffer {
+            local lineCount is ceiling(error:length / terminal:width).
+            set i to i + lineCount.
+        }
+        local newErrorLineCount is ceiling(newError:length / terminal:width).
+        
+        return i + newErrorLineCount <= height.
+    }
+    
+    // Prefix error count
+    set errorCount to errorCount + 1.
+    local errorNumberPrefix is "[" + errorCount + "] ".
+    local error is errorNumberPrefix + msg.
+    
+    // Remove old messages if necessary
+    until spaceForNewError(error) {
+        errorBuffer:remove(0).
+    }
+    errorBuffer:add(error).
+    
+    // Print the buffer
+    local i is ERROR_LINE.
+    for error in errorBuffer {
+        printLine(error, i).
+        local lineCount is ceiling(error:length / terminal:width).
+        set i to i + lineCount.
+    }
+    
+    // Clear the rest of the lines
+    until i >= height {
+        printLine("", i).
+        set i to i + 1.
+    }
 }
