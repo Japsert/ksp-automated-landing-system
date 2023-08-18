@@ -40,45 +40,48 @@ for line in lines:
         (float(cols[time_col]), float(cols[lat_col]), float(cols[lng_col]))
     )
 
+# Make all lat/lng values relative to that run's last point
+for run in runs:
+    last_point = run["points"][-1]
+    last_lat, last_lng = last_point[lat_col], last_point[lng_col]
+    for i, point in enumerate(run["points"]):
+        run["points"][i] = (
+            point[time_col],
+            point[lat_col] - last_lat,
+            point[lng_col] - last_lng,
+        )
+
 start = time()
 data_start_time = min(run["points"][0][time_col] for run in runs)
 log_time_range = max(run["points"][-1][time_col] for run in runs) - data_start_time
 
 fig, ax = plt.subplots()
 
-# Calculate center and bounds
-center_lat = runs[0]["points"][-1][lat_col]  # take first run's last point as center
-center_lng = runs[0]["points"][-1][lng_col]
-
 # Calculate x and y limits
 # get the maximum deviation of any data points of any run from the center
 max_deviation = max(
-    max(abs(point[lat_col] - center_lat), abs(point[lng_col] - center_lng))
+    max(abs(point[lat_col]), abs(point[lng_col]))
     for run in runs
     for point in run["points"]
 )
 # use that, plus a little wiggle room, to calculate the bounds
 lim_offset = max_deviation * 1.1 / zoom_factor
-xmax = center_lng + lim_offset
-ymin = center_lat - lim_offset
-ymax = center_lat + lim_offset
-xmin = center_lng - lim_offset
-ax.set_xlim(xmin, xmax)
-ax.set_ylim(ymin, ymax)
+ax.set_xlim(-lim_offset, lim_offset)
+ax.set_ylim(-lim_offset, lim_offset)
 
 # Draw center lines
-ax.axhline(center_lat, color="lightgray", zorder=-1)
-ax.axvline(center_lng, color="lightgray", zorder=-1)
+ax.axhline(y=0, color="lightgray", zorder=-1)
+ax.axvline(x=0, color="lightgray", zorder=-1)
 
 # Set custom ticks
 # convert lat/lng values to meters from center
 planet_radius = 600000
 planet_circumference = 2 * planet_radius * pi
 lat_lng_to_m = planet_circumference / 360
-xticks = np.linspace(xmin, xmax, 9)
-yticks = np.linspace(ymin, ymax, 9)
-xticklabels = [int((tick - center_lng) * lat_lng_to_m) for tick in xticks]
-yticklabels = [int((tick - center_lat) * lat_lng_to_m) for tick in yticks]
+xticks = np.linspace(-lim_offset, lim_offset, 9)
+yticks = np.linspace(-lim_offset, lim_offset, 9)
+xticklabels = [int(tick * lat_lng_to_m) for tick in xticks]
+yticklabels = [int(tick * lat_lng_to_m) for tick in yticks]
 ax.set_xticks(xticks, labels=xticklabels)
 ax.set_yticks(yticks, labels=yticklabels)
 
@@ -91,7 +94,8 @@ newest_points = []
 # Plot runs (empty for now)
 for run in runs:
     (line,) = ax.plot([], [])
-    (newest_point,) = ax.plot([], [], "rx", markersize=7)
+    # newest point color will get overwritten later
+    (newest_point,) = ax.plot([], [], color="black", marker="x", markersize=7)
     lines.append(line)
     newest_points.append(newest_point)
 
@@ -129,12 +133,13 @@ def update(frame):
             [point[lng_col] for point in run],
             [point[lat_col] for point in run],
         )
-        # plot newest points as red crosses
+        # plot newest points as crosses in the same color as the line
         newest_point.set_data([run[-1][lng_col]], [run[-1][lat_col]])
+        newest_point.set_color(line.get_color())
 
     ax.set_title(
         f"{sped_up_time:.1f}/{log_time_range:.1f} seconds "
-        "(sped up {speedup_factor}x)"
+        f"(sped up {speedup_factor}x)"
     )
 
     return line, newest_points
