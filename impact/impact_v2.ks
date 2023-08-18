@@ -6,8 +6,10 @@ clearVecDraws().
 global doLog is true.
 global logPath is "0:/impact/impact.log".
 // log file should have "time,lat,lng" on the first line.
-global runName is "no drag (dt=2, instead of 5)".
+global runName is "RK2, no drag, dt=5".
 if doLog log "--- " + runName to logPath. // new run marker
+
+global DO_INITIAL_BURN is true.
 
 global DEBUG_LINE is 10.
 global VAR_LINE is 22.
@@ -21,12 +23,12 @@ global drawnImpactVector is vecDraw().
 
 
 // Constants
-global DELTA_TIME is 2.
+global DELTA_TIME is 5.
 global MAX_ITERATIONS is 150.
 
 
 // Initial sub-orbital burn to plot impact position over time
-if not (ship:apoapsis > 40000) { // DEBUG
+if DO_INITIAL_BURN and not (ship:apoapsis > 40000) { // DEBUG
     clearScreen. print "Burning until apoapsis >= 50 km...".
     if shouldStage() stage.
     lock throttle to 1.
@@ -91,95 +93,195 @@ function shouldStage {
 }
 
 
+function calculateAccelerationNoDrag {
+    local parameter prevPos.
+    local parameter prevAlt.
+    local parameter prevVelVec.
+    
+    // Gravity vector
+    local g is body:mu / (body:radius + prevAlt)^2.
+    local gravForce is g * ship:mass. // kN
+    local gravForceVec is gravForce * -ship:up:vector.
+    
+    // Total force vector
+    local totalForceVec is gravForceVec. // kN
+    
+    // Acceleration vector
+    local accVec is totalForceVec / ship:mass. // Constant mass, no burn yet
+    
+    return accVec.
+}
+
+function calculateAcceleration {
+    local parameter prevPos.
+    local parameter prevAlt.
+    local parameter prevVelVec.
+    
+    // Gravity vector
+    local g is body:mu / (body:radius + prevAlt)^2.
+    local gravForce is g * ship:mass. // kN
+    local gravForceVec is gravForce * -ship:up:vector.
+    
+    // Drag vector
+    local temperature is lookUpTemp(prevAlt).
+    local staticPressure is body:atm:altitudePressure(prevAlt).
+    local atmDensity is (staticPressure * body:atm:molarMass)
+                            / (constant:idealGas * temperature).
+    local atmDensityKPa is atmDensity * constant:atmToKPa.
+    
+    local sqrVelocity is prevVelVec:sqrMagnitude.
+    
+    local bulkModulus is staticPressure * body:atm:adiabaticIndex.
+    local speedOfSound is sqrt(bulkModulus / atmDensity).
+    local vel is prevVelVec:mag.
+    local machNumber is vel / speedOfSound.
+    local CdA is lookUpCdA(machNumber).
+    
+    local dragForce is 1/2 * atmDensityKPa * sqrVelocity * CdA. // kN
+    local dragForceVec is dragForce * -prevVelVec:normalized.
+    
+    // Total force vector
+    local totalForceVec is gravForceVec + dragForceVec. // kN
+    
+    // Acceleration vector
+    local accVec is totalForceVec / ship:mass. // Constant mass, no burn yet
+    
+    return accVec.
+}
+
+
+// Returns the position, altitude and velocity vector that a ship with the
+// given position, altitude and velocity vector would have after one time step.
+function updatePosAltVelRK1 {
+    local parameter pos.
+    local parameter alt_.
+    local parameter velVec.
+    
+    // Determine current acceleration
+    local accVec is calculateAccelerationNoDrag(pos, alt_, velVec).
+    // Add acceleration to velocity vector
+    local newVelVec is velVec + accVec * DELTA_TIME.
+    // Update pos, alt and vel, accounting for curvature of the planet
+    local positionChangeVec is newVelVec * DELTA_TIME.
+    local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
+    local newPos to body:geoPositionOf(vecToNewPos).
+    local newAlt to body:altitudeOf(vecToNewPos).
+    
+    return lexicon(
+        "position", newPos,
+        "altitude", newAlt,
+        "velocityVector", newVelVec
+    ).
+}
+
+// 
+function updatePosAltVelRK2 {
+    local parameter prevPos.
+    local parameter prevAlt.
+    local parameter prevVelVec.
+    
+    // Acceleration at the start of the interval
+    local accVec1 is calculateAccelerationNoDrag(prevPos, prevAlt, prevVelVec).
+    
+    // Pos, alt and vel vector at the end of the interval
+    local velVec1 is prevVelVec + accVec1 * DELTA_TIME.
+    local positionChangeVec1 is velVec1 * DELTA_TIME.
+    local vecToPos1 is prevPos:altitudePosition(prevAlt) + positionChangeVec1.
+    local pos1 is body:geoPositionOf(vecToPos1).
+    local alt1 is body:altitudeOf(vecToPos1).
+    
+    // Acceleration at the end of the interval
+    local accVec2 is calculateAccelerationNoDrag(pos1, alt1, velVec1).
+    
+    // Average accelerations
+    local accVecAvg is (accVec1 + accVec2) / 2.
+    
+    // Update pos, alt and vel vector, accounting for curvature of the planet
+    local newVelVec is prevVelVec + accVecAvg * DELTA_TIME.
+    local positionChangeVec is newVelVec * DELTA_TIME.
+    local vecToNewPos is prevPos:altitudePosition(prevAlt) + positionChangeVec.
+    local newPos to body:geoPositionOf(vecToNewPos).
+    local newAlt to body:altitudeOf(vecToNewPos).
+    
+    return lexicon(
+        "position", newPos,
+        "altitude", newAlt,
+        "velocityVector", newVelVec
+    ).
+}
+
+
+// If the given location (pos/alt) is below the surface, interpolates between
+// the previous location and the current location to estimate the actual impact
+// position, and returns a lexicon with the position and altitude.
+function hasImpactedSurface {
+    local parameter newPos.
+    local parameter newAlt.
+    local parameter pos.
+    local parameter alt_.
+    
+    local posImpactHeight is max(newPos:terrainHeight, 0).
+    if newAlt > posImpactHeight return lexicon(
+        "impacted", false,
+        "position", 0,
+        "altitude", 0
+    ).
+    
+    // The location is below the surface, interpolate between pos and prevPos
+    // to estimate landing position
+    local prevPosImpactHeight is max(pos:terrainHeight, 0).
+    local averageImpactHeight is (posImpactHeight + prevPosImpactHeight) / 2.
+    local altRatio is (alt_ - averageImpactHeight) / (alt_ - newAlt).
+    local interpolatedPos is latLng(
+        pos:lat + (newPos:lat - pos:lat) * altRatio,
+        pos:lng + (newPos:lng - pos:lng) * altRatio
+    ).
+    return lexicon(
+        "impacted", true,
+        "position", interpolatedPos,
+        "altitude", max(interpolatedPos:terrainHeight, 0)
+    ).
+}
+
+
 function getImpactPos {
-    // Initial values
     local parameter initialPos.
     local parameter initialAlt.
     local parameter initialVelVec.
     
-    // Loop variables
     local pos is initialPos.
     local alt_ is initialAlt.
     local velVec is initialVelVec.
     
     local i is 0.
-    local reachedGround is false, maxIterationsReached is false.
-    local impactPos is false, impactAlt is false.
+    local reachedGround is false.
+    local maxIterationsReached is false.
+    local impactPos is false.
+    local impactAlt is false.
+    
     until reachedGround or maxIterationsReached {
-        // Save previous values for interpolation
-        local prevPos is pos.
-        local prevAlt is alt_.
-        local prevVelVec is velVec.
-        
-        
-        // Gravity vector
-        local g is body:mu / (body:radius + prevAlt)^2.
-        local gravForce is g * ship:mass. // kN
-        local gravForceVec is gravForce * -ship:up:vector.
-        
-        // Drag vector
-        local temperature is lookUpTemp(prevAlt).
-        local staticPressure is body:atm:altitudePressure(prevAlt).
-        local atmDensity is (staticPressure * body:atm:molarMass)
-                                / (constant:idealGas * temperature).
-        local atmDensityKPa is atmDensity * constant:atmToKPa.
-        
-        local sqrVelocity is prevVelVec:sqrMagnitude.
-        
-        local bulkModulus is staticPressure * body:atm:adiabaticIndex.
-        local speedOfSound is sqrt(bulkModulus / atmDensity).
-        local vel is prevVelVec:mag.
-        local machNumber is vel / speedOfSound.
-        local CdA is lookUpCdA(machNumber).
-        
-        local dragForce is 1/2 * atmDensityKPa * sqrVelocity * CdA. // kN
-        local dragForceVec is dragForce * -prevVelVec:normalized.
-        
-        // Total force vector
-        local totalForceVec is gravForceVec + dragForceVec. // kN
-        
-        // Acceleration vector
-        local accVec is totalForceVec / ship:mass. // Constant mass, no burn yet
-        
-        // Update velocity
-        set velVec to velVec + accVec * DELTA_TIME.
-        
-        // Update position, accounting for curvature of the planet
-        local positionChangeVec is velVec * DELTA_TIME.
-        local vecToNewPos is prevPos:altitudePosition(prevAlt) + positionChangeVec.
-        set pos to body:geoPositionOf(vecToNewPos).
-        set alt_ to body:altitudeOf(vecToNewPos).
-        
-        // DEBUG: print vars
-        if i = 0 printVars(list(
-            list("atm density", atmDensity, "kg/m^3"),
-            list("mach number", machNumber, ""),
-            list("CdA", CdA, "m^2"),
-            list("sqrVelocity", sqrVelocity, "m^2/s^2"),
-            list("drag force", dragForce, "kN")
-        )).
-        
+        // Get new position, altitude and velocity vector based on current state
+        local newPosAltVel is updatePosAltVelRK1(pos, alt_, velVec).
+        local newPos is newPosAltVel:position.
+        local newAlt is newPosAltVel:altitude.
+        local newVelVec is newPosAltVel:velocityVector.
         
         // Check if we have impacted
-        local posImpactHeight is max(pos:terrainHeight, 0).
-        if alt_ <= posImpactHeight {
+        local surfaceImpact is hasImpactedSurface(newPos, newAlt, pos, alt_).
+        if surfaceImpact:impacted {
             set reachedGround to true.
-            // Interpolate between pos and prevPos to find precise landing pos
-            local prevPosImpactHeight is max(prevPos:terrainHeight, 0).
-            local averageImpactHeight is (posImpactHeight + prevPosImpactHeight) / 2.
-            local altRatio is (prevAlt - averageImpactHeight) / (prevAlt - alt_).
-            local interpolatedPos is latLng(
-                prevPos:lat + (pos:lat - prevPos:lat) * altRatio,
-                prevPos:lng + (pos:lng - prevPos:lng) * altRatio
-            ).
-            set impactPos to interpolatedPos.
-            set impactAlt to max(impactPos:terrainHeight, 0).
+            set impactPos to surfaceImpact:position.
+            set impactAlt to surfaceImpact:altitude.
         }
-        
         
         // Check if we should give up
         set i to i + 1.
         if i >= MAX_ITERATIONS set maxIterationsReached to true.
+        
+        // Update pos, alt and velVec for next iteration
+        set pos to newPos.
+        set alt_ to newAlt.
+        set velVec to newVelVec.
     }
     
     return lexicon(
@@ -294,6 +396,7 @@ function lookUpTemp {
 }
 
 
+// Look up the drag coefficient at a given Mach number in a lookup table.
 function lookUpCdA {
     local parameter machNumber.
     
@@ -426,6 +529,7 @@ function printVars {
     }
 }
 
+// DEBUG: helper function
 function printLine {
     local parameter string.
     local parameter line.
@@ -433,7 +537,6 @@ function printLine {
     set string to string:padright(terminal:width).
     print string at (0, line).
 }
-
 
 // DEBUG: helper function
 function printError {
