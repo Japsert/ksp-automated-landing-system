@@ -94,12 +94,13 @@ function shouldStage {
 
 
 function calculateAccelerationNoDrag {
-    local parameter prevPos.
-    local parameter prevAlt.
-    local parameter prevVelVec.
+    local parameter pos.
+    local parameter alt_.
+    local parameter velVec.
+    local parameter drawDebugVec.
     
     // Gravity vector
-    local g is body:mu / (body:radius + prevAlt)^2.
+    local g is body:mu / (body:radius + alt_)^2.
     local gravForce is g * ship:mass. // kN
     local gravForceVec is gravForce * -ship:up:vector.
     
@@ -113,32 +114,32 @@ function calculateAccelerationNoDrag {
 }
 
 function calculateAcceleration {
-    local parameter prevPos.
-    local parameter prevAlt.
-    local parameter prevVelVec.
+    local parameter pos.
+    local parameter alt_.
+    local parameter velVec.
     
     // Gravity vector
-    local g is body:mu / (body:radius + prevAlt)^2.
+    local g is body:mu / (body:radius + alt_)^2.
     local gravForce is g * ship:mass. // kN
     local gravForceVec is gravForce * -ship:up:vector.
     
     // Drag vector
-    local temperature is lookUpTemp(prevAlt).
-    local staticPressure is body:atm:altitudePressure(prevAlt).
+    local temperature is lookUpTemp(alt_).
+    local staticPressure is body:atm:altitudePressure(alt_).
     local atmDensity is (staticPressure * body:atm:molarMass)
                             / (constant:idealGas * temperature).
     local atmDensityKPa is atmDensity * constant:atmToKPa.
     
-    local sqrVelocity is prevVelVec:sqrMagnitude.
+    local sqrVelocity is velVec:sqrMagnitude.
     
     local bulkModulus is staticPressure * body:atm:adiabaticIndex.
     local speedOfSound is sqrt(bulkModulus / atmDensity).
-    local vel is prevVelVec:mag.
+    local vel is velVec:mag.
     local machNumber is vel / speedOfSound.
     local CdA is lookUpCdA(machNumber).
     
     local dragForce is 1/2 * atmDensityKPa * sqrVelocity * CdA. // kN
-    local dragForceVec is dragForce * -prevVelVec:normalized.
+    local dragForceVec is dragForce * -velVec:normalized.
     
     // Total force vector
     local totalForceVec is gravForceVec + dragForceVec. // kN
@@ -174,19 +175,19 @@ function updatePosAltVelRK1 {
     ).
 }
 
-// 
 function updatePosAltVelRK2 {
-    local parameter prevPos.
-    local parameter prevAlt.
-    local parameter prevVelVec.
+    local parameter pos.
+    local parameter alt_.
+    local parameter velVec.
+    local parameter drawDebugVec.
     
     // Acceleration at the start of the interval
-    local accVec1 is calculateAccelerationNoDrag(prevPos, prevAlt, prevVelVec).
+    local accVec1 is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVec).
     
     // Pos, alt and vel vector at the end of the interval
-    local velVec1 is prevVelVec + accVec1 * DELTA_TIME.
     local positionChangeVec1 is velVec1 * DELTA_TIME.
-    local vecToPos1 is prevPos:altitudePosition(prevAlt) + positionChangeVec1.
+    local velVec1 is velVec + accVec1 * DELTA_TIME.
+    local vecToPos1 is pos:altitudePosition(alt_) + positionChangeVec1.
     local pos1 is body:geoPositionOf(vecToPos1).
     local alt1 is body:altitudeOf(vecToPos1).
     
@@ -197,9 +198,9 @@ function updatePosAltVelRK2 {
     local accVecAvg is (accVec1 + accVec2) / 2.
     
     // Update pos, alt and vel vector, accounting for curvature of the planet
-    local newVelVec is prevVelVec + accVecAvg * DELTA_TIME.
     local positionChangeVec is newVelVec * DELTA_TIME.
-    local vecToNewPos is prevPos:altitudePosition(prevAlt) + positionChangeVec.
+    local newVelVec is velVec + accVecAvg * DELTA_TIME.
+    local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
     
@@ -212,7 +213,7 @@ function updatePosAltVelRK2 {
 
 
 // If the given location (pos/alt) is below the surface, interpolates between
-// the previous location and the current location to estimate the actual impact
+// the previous location and the new location to estimate the actual impact
 // position, and returns a lexicon with the position and altitude.
 function hasImpactedSurface {
     local parameter newPos.
@@ -220,17 +221,17 @@ function hasImpactedSurface {
     local parameter pos.
     local parameter alt_.
     
-    local posImpactHeight is max(newPos:terrainHeight, 0).
-    if newAlt > posImpactHeight return lexicon(
+    local newPosImpactHeight is max(newPos:terrainHeight, 0).
+    if newAlt > newPosImpactHeight return lexicon(
         "impacted", false,
         "position", 0,
         "altitude", 0
     ).
     
-    // The location is below the surface, interpolate between pos and prevPos
+    // The location is below the surface, interpolate between pos and newPos
     // to estimate landing position
-    local prevPosImpactHeight is max(pos:terrainHeight, 0).
-    local averageImpactHeight is (posImpactHeight + prevPosImpactHeight) / 2.
+    local oldPosImpactHeight is max(pos:terrainHeight, 0).
+    local averageImpactHeight is (newPosImpactHeight + oldPosImpactHeight) / 2.
     local altRatio is (alt_ - averageImpactHeight) / (alt_ - newAlt).
     local interpolatedPos is latLng(
         pos:lat + (newPos:lat - pos:lat) * altRatio,
