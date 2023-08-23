@@ -2,9 +2,18 @@
 clearScreen.
 clearVecDraws().
 
+local parameter doInitialBurn is false.
+
 // Time step in seconds
 global DT is 1.
 print "dT: " + DT + "s" at (0, 0).
+
+local drawDebugVectors is false.
+when terminal:input:haschar then {
+    if terminal:input:getchar() = "w" {
+        set drawDebugVectors to true.
+    }
+}
 
 // Draws a vector from pos to pos + vec
 function drawDebugVec {
@@ -20,16 +29,18 @@ function drawDebugVec {
 }
 
 // Initial burn
-stage.
-lock throttle to 1.
-lock steering to heading(90, 80, 270).
-wait until ship:altitude > 1000.
-lock throttle to 0.
+if doInitialBurn {
+    stage.
+    lock throttle to 1.
+    lock steering to heading(90, 80, 270).
+    wait until ship:altitude > 1000.
+    lock throttle to 0.
 
-// Wait 5 ticks to make sure throttle delay doesn't influence acceleration
-wait 0.1.
-// Draw debug vectors for the first loop
-local drawDebugVectors is true.
+    // Wait 5 ticks to make sure throttle delay doesn't influence acceleration
+    wait 0.1.
+    // Draw debug vectors for the first loop
+    set drawDebugVectors to true.
+}
 
 until false {
     local pos is ship:geoPosition.
@@ -41,7 +52,8 @@ until false {
         // Gravitational acceleration at current pos/alt
         local g is body:mu / (body:radius + alt_)^2.
         local gravForce is g * ship:mass. // kN
-        local gravForceVec is gravForce * -ship:up:vector.
+        local vecToCenterAtPos is body:position - pos:position.
+        local gravForceVec is gravForce * vecToCenterAtPos:normalized.
         local accVec is gravForceVec / ship:mass.
         
         // Vector from this iteration's pos/alt to next iteration's pos/alt
