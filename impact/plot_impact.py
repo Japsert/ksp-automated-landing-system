@@ -21,7 +21,9 @@ mpl.rcParams["axes.prop_cycle"] = mpl.cycler(color=run_colors)  # set run colors
 # Read data
 log_file = "impact/impact.log"
 with open(log_file, "r") as f:
-    lines = f.readlines()[1:]  # skip header
+    lines = f.readlines()
+    if lines[0].startswith("time"):
+        lines.pop(0)  # remove header line
 
 runs = []
 
@@ -42,6 +44,8 @@ for line in lines:
 
 # Make all lat/lng values relative to that run's last point
 for run in runs:
+    if not run["points"]:
+        continue
     last_point = run["points"][-1]
     last_lat, last_lng = last_point[lat_col], last_point[lng_col]
     for i, point in enumerate(run["points"]):
