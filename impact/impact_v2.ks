@@ -2,13 +2,13 @@
 clearVecDraws().
 
 
+local parameter DO_INITIAL_BURN is false.
+local parameter DO_LOG is false.
+
 // Logging and debugging
-global doLog is true.
 global logPath is "0:/impact/impact.log".
 global runName is "RK2, no drag, dt=5".
-if doLog log "--- " + runName to logPath. // new run marker
-
-global DO_INITIAL_BURN is true.
+if DO_LOG log "--- " + runName to logPath. // new run marker
 
 global DEBUG_LINE is 10.
 global VAR_LINE is 22.
@@ -20,8 +20,8 @@ global printErrors is false.
 
 global drawnImpactVector is vecDraw().
 
-// DEBUG
-global drawDebugVectors is false.
+// DEBUG: draw trajectory vectors when 'w' is pressed
+local drawDebugVectors is false.
 when terminal:input:hasChar then {
     if terminal:input:getChar() = "w" {
         set drawDebugVectors to true.
@@ -31,8 +31,20 @@ when terminal:input:hasChar then {
 
 
 // Constants
-global DELTA_TIME is 5.
+global TIME_STEP is 5.
 global MAX_ITERATIONS is 150.
+
+
+// Checks if we should stage to be able to burn.
+// Returns true if there is an ignited engine, false if not.
+function shouldStage {
+    local engines is list().
+    list engines in engines.
+    for engine in engines {
+        if engine:ignition return false.
+    }
+    return true.
+}
 
 
 // Initial sub-orbital burn to plot impact position over time
@@ -65,10 +77,11 @@ until false {
     set drawDebugVectors to false.
     
     // DEBUG: if impact found, draw vector to impact position and print coords
-    if impactRK2:isFound {
-        local impactPos is impactRK2:position.
-        local impactAlt is impactRK2:altitude.
-        local iterations is impactRK2:iterations.
+    local impact is impactRK2.
+    if impact:isFound {
+        local impactPos is impact:position.
+        local impactAlt is impact:altitude.
+        local iterations is impact:iterations.
         set drawnImpactVector to vecDraw(
             ship:position, impactPos:altitudePosition(impactAlt),
             red, "", 1, true
@@ -79,7 +92,7 @@ until false {
         print "alt: " + impactAlt + "    " at (0, DEBUG_LINE+3).
         
         // Logging
-        if doLog log list(
+        if DO_LOG log list(
             (time-start):seconds, impactPos:lat, impactPos:lng
         ):join(",") to logPath.
     } else {
@@ -91,18 +104,6 @@ until false {
     }
     
     wait 0.
-}
-
-
-// Checks if we should stage to be able to burn.
-// Returns true if there is an ignited engine, false if not.
-function shouldStage {
-    local engines is list().
-    list engines in engines.
-    for engine in engines {
-        if engine:ignition return false.
-    }
-    return true.
 }
 
 
@@ -175,9 +176,9 @@ function updatePosAltVelRK1 {
     // Determine current acceleration
     local accVec is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVecs).
     // Add acceleration to velocity vector
-    local newVelVec is velVec + accVec * DELTA_TIME.
+    local newVelVec is velVec + accVec * TIME_STEP.
     // Update pos, alt and vel, accounting for curvature of the planet
-    local positionChangeVec is velVec * DELTA_TIME + 1/2 * accVec * DELTA_TIME^2.
+    local positionChangeVec is velVec * TIME_STEP + 1/2 * accVec * TIME_STEP^2.
     local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
@@ -206,8 +207,8 @@ function updatePosAltVelRK2 {
     local accVec1 is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVecs).
     
     // Pos, alt and vel vector at the end of the interval
-    local velVec1 is velVec + accVec1 * DELTA_TIME.
-    local positionChangeVec1 is velVec * DELTA_TIME + 1/2 * accVec1 * DELTA_TIME^2.
+    local velVec1 is velVec + accVec1 * TIME_STEP.
+    local positionChangeVec1 is velVec * TIME_STEP + 1/2 * accVec1 * TIME_STEP^2.
     local vecToPos1 is pos:altitudePosition(alt_) + positionChangeVec1.
     local pos1 is body:geoPositionOf(vecToPos1).
     local alt1 is body:altitudeOf(vecToPos1).
@@ -219,8 +220,8 @@ function updatePosAltVelRK2 {
     local accVecAvg is (accVec1 + accVec2) / 2.
     
     // Update pos, alt and vel vector, accounting for curvature of the planet
-    local newVelVec is velVec + accVecAvg * DELTA_TIME.
-    local positionChangeVec is velVec * DELTA_TIME + 1/2 * accVecAvg * DELTA_TIME^2.
+    local newVelVec is velVec + accVecAvg * TIME_STEP.
+    local positionChangeVec is velVec * TIME_STEP + 1/2 * accVecAvg * TIME_STEP^2.
     local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
