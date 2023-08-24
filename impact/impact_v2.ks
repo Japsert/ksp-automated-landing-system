@@ -163,7 +163,7 @@ function updatePosAltVelRK1 {
     // Add acceleration to velocity vector
     local newVelVec is velVec + accVec * DELTA_TIME.
     // Update pos, alt and vel, accounting for curvature of the planet
-    local positionChangeVec is newVelVec * DELTA_TIME.
+    local positionChangeVec is velVec * DELTA_TIME + 1/2 * accVec * DELTA_TIME^2.
     local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
@@ -185,8 +185,8 @@ function updatePosAltVelRK2 {
     local accVec1 is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVec).
     
     // Pos, alt and vel vector at the end of the interval
-    local positionChangeVec1 is velVec1 * DELTA_TIME.
     local velVec1 is velVec + accVec1 * DELTA_TIME.
+    local positionChangeVec1 is velVec * DELTA_TIME + 1/2 * accVec1 * DELTA_TIME^2.
     local vecToPos1 is pos:altitudePosition(alt_) + positionChangeVec1.
     local pos1 is body:geoPositionOf(vecToPos1).
     local alt1 is body:altitudeOf(vecToPos1).
@@ -198,8 +198,8 @@ function updatePosAltVelRK2 {
     local accVecAvg is (accVec1 + accVec2) / 2.
     
     // Update pos, alt and vel vector, accounting for curvature of the planet
-    local positionChangeVec is newVelVec * DELTA_TIME.
     local newVelVec is velVec + accVecAvg * DELTA_TIME.
+    local positionChangeVec is velVec * DELTA_TIME + 1/2 * accVecAvg * DELTA_TIME^2.
     local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
