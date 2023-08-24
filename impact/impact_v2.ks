@@ -5,7 +5,6 @@ clearVecDraws().
 // Logging and debugging
 global doLog is true.
 global logPath is "0:/impact/impact.log".
-// log file should have "time,lat,lng" on the first line.
 global runName is "RK2, no drag, dt=5".
 if doLog log "--- " + runName to logPath. // new run marker
 
@@ -20,6 +19,15 @@ global errorCount is 0.
 global printErrors is false.
 
 global drawnImpactVector is vecDraw().
+
+// DEBUG
+global drawDebugVectors is false.
+when terminal:input:hasChar then {
+    if terminal:input:getChar() = "w" {
+        set drawDebugVectors to true.
+    }
+    preserve.
+}
 
 
 // Constants
@@ -47,18 +55,23 @@ if DO_INITIAL_BURN and not (ship:apoapsis > 40000) { // DEBUG
 clearScreen.
 global start is time:seconds.
 until false {
-    local impact is getImpactPos(
-        ship:geoPosition, ship:altitude, ship:velocity:surface
+    local drawDebugVectorsThisIteration is drawDebugVectors.
+    local impactRK1 is getImpactPos(
+        ship:geoPosition, ship:altitude, ship:velocity:surface, drawDebugVectorsThisIteration
     ).
+    local impactRK2 is getImpactPosRK2(
+        ship:geoPosition, ship:altitude, ship:velocity:surface, drawDebugVectorsThisIteration
+    ).
+    set drawDebugVectors to false.
     
     // DEBUG: if impact found, draw vector to impact position and print coords
-    if impact:isFound {
-        local impactPos is impact:position.
-        local impactAlt is impact:altitude.
-        local iterations is impact:iterations.
+    if impactRK2:isFound {
+        local impactPos is impactRK2:position.
+        local impactAlt is impactRK2:altitude.
+        local iterations is impactRK2:iterations.
         set drawnImpactVector to vecDraw(
             ship:position, impactPos:altitudePosition(impactAlt),
-            red, "impact", 1, true
+            red, "", 1, true
         ).
         print "Impact found in " + iterations + "/" + MAX_ITERATIONS + " iterations!    " at (0, DEBUG_LINE).
         print "lat: " + impactPos:lat + "    " at (0, DEBUG_LINE+1).
@@ -97,7 +110,7 @@ function calculateAccelerationNoDrag {
     local parameter pos.
     local parameter alt_.
     local parameter velVec.
-    local parameter drawDebugVec.
+    local parameter drawDebugVecs.
     
     // Gravity vector
     local g is body:mu / (body:radius + alt_)^2.
@@ -157,9 +170,10 @@ function updatePosAltVelRK1 {
     local parameter pos.
     local parameter alt_.
     local parameter velVec.
+    local parameter drawDebugVecs. // DEBUG
     
     // Determine current acceleration
-    local accVec is calculateAccelerationNoDrag(pos, alt_, velVec).
+    local accVec is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVecs).
     // Add acceleration to velocity vector
     local newVelVec is velVec + accVec * DELTA_TIME.
     // Update pos, alt and vel, accounting for curvature of the planet
@@ -167,6 +181,13 @@ function updatePosAltVelRK1 {
     local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
+    
+    // DEBUG
+    if drawDebugVecs vecDraw(
+        { return pos:altitudePosition(alt_). },
+        positionChangeVec,
+        blue, "RK1", 1, true
+    ).
     
     return lexicon(
         "position", newPos,
@@ -179,10 +200,10 @@ function updatePosAltVelRK2 {
     local parameter pos.
     local parameter alt_.
     local parameter velVec.
-    local parameter drawDebugVec.
+    local parameter drawDebugVecs.
     
     // Acceleration at the start of the interval
-    local accVec1 is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVec).
+    local accVec1 is calculateAccelerationNoDrag(pos, alt_, velVec, drawDebugVecs).
     
     // Pos, alt and vel vector at the end of the interval
     local velVec1 is velVec + accVec1 * DELTA_TIME.
@@ -192,7 +213,7 @@ function updatePosAltVelRK2 {
     local alt1 is body:altitudeOf(vecToPos1).
     
     // Acceleration at the end of the interval
-    local accVec2 is calculateAccelerationNoDrag(pos1, alt1, velVec1).
+    local accVec2 is calculateAccelerationNoDrag(pos1, alt1, velVec1, drawDebugVecs).
     
     // Average accelerations
     local accVecAvg is (accVec1 + accVec2) / 2.
@@ -203,6 +224,13 @@ function updatePosAltVelRK2 {
     local vecToNewPos is pos:altitudePosition(alt_) + positionChangeVec.
     local newPos to body:geoPositionOf(vecToNewPos).
     local newAlt to body:altitudeOf(vecToNewPos).
+    
+    // DEBUG
+    if drawDebugVecs vecDraw(
+        { return pos:altitudePosition(alt_). },
+        positionChangeVec,
+        green, "RK2", 1, true
+    ).
     
     return lexicon(
         "position", newPos,
@@ -249,6 +277,7 @@ function getImpactPos {
     local parameter initialPos.
     local parameter initialAlt.
     local parameter initialVelVec.
+    local parameter drawDebugVecs.
     
     local pos is initialPos.
     local alt_ is initialAlt.
@@ -262,7 +291,56 @@ function getImpactPos {
     
     until reachedGround or maxIterationsReached {
         // Get new position, altitude and velocity vector based on current state
-        local newPosAltVel is updatePosAltVelRK1(pos, alt_, velVec).
+        local newPosAltVel is updatePosAltVelRK1(pos, alt_, velVec, drawDebugVecs).
+        local newPos is newPosAltVel:position.
+        local newAlt is newPosAltVel:altitude.
+        local newVelVec is newPosAltVel:velocityVector.
+        
+        // Check if we have impacted
+        local surfaceImpact is hasImpactedSurface(newPos, newAlt, pos, alt_).
+        if surfaceImpact:impacted {
+            set reachedGround to true.
+            set impactPos to surfaceImpact:position.
+            set impactAlt to surfaceImpact:altitude.
+        }
+        
+        // Check if we should give up
+        set i to i + 1.
+        if i >= MAX_ITERATIONS set maxIterationsReached to true.
+        
+        // Update pos, alt and velVec for next iteration
+        set pos to newPos.
+        set alt_ to newAlt.
+        set velVec to newVelVec.
+    }
+    
+    return lexicon(
+        "isFound", reachedGround,
+        "position", impactPos,
+        "altitude", impactAlt,
+        "iterations", i
+    ).
+}
+
+function getImpactPosRK2 {
+    local parameter initialPos.
+    local parameter initialAlt.
+    local parameter initialVelVec.
+    local parameter drawDebugVecs.
+    
+    local pos is initialPos.
+    local alt_ is initialAlt.
+    local velVec is initialVelVec.
+    
+    local i is 0.
+    local reachedGround is false.
+    local maxIterationsReached is false.
+    local impactPos is false.
+    local impactAlt is false.
+    
+    until reachedGround or maxIterationsReached {
+        // Get new position, altitude and velocity vector based on current state
+        local newPosAltVel is updatePosAltVelRK2(pos, alt_, velVec, drawDebugVecs).
         local newPos is newPosAltVel:position.
         local newAlt is newPosAltVel:altitude.
         local newVelVec is newPosAltVel:velocityVector.
