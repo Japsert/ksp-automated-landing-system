@@ -66,6 +66,7 @@ if DO_INITIAL_BURN and not (ship:apoapsis > 40000) { // DEBUG
 // Now coasting until impact. Calculate impact position every tick
 clearScreen.
 global start is time:seconds.
+local tr is addons:tr.
 until false {
     local drawDebugVectorsThisIteration is drawDebugVectors.
     //local impactRK1 is getImpactPos(
@@ -87,9 +88,9 @@ until false {
             red, "", 1, true
         ).
         print "Impact found in " + iterations + "/" + MAX_ITERATIONS + " iterations!    " at (0, DEBUG_LINE).
-        print "lat: " + impactPos:lat + "    " at (0, DEBUG_LINE+1).
-        print "lng: " + impactPos:lng + "    " at (0, DEBUG_LINE+2).
-        print "alt: " + impactAlt + "    " at (0, DEBUG_LINE+3).
+        print "lat: " + round(impactPos:lat, 6) + "    " at (0, DEBUG_LINE+1).
+        print "lng: " + round(impactPos:lng, 6) + "    " at (0, DEBUG_LINE+2).
+        print "alt: " + round(impactAlt, 2) + "    " at (0, DEBUG_LINE+3).
         
         // Logging
         if DO_LOG log list(
@@ -101,6 +102,20 @@ until false {
         print "                                  " at (0, DEBUG_LINE+1).
         print "                                  " at (0, DEBUG_LINE+2).
         print "                                  " at (0, DEBUG_LINE+3).
+    }
+    
+    // DEBUG: Trajectories impact estimation
+    if tr:available {
+        if tr:hasImpact {
+            local impactPos is tr:impactPos.
+            print "Trajectories impact position:" at (0, DEBUG_LINE+5).
+            print "lat: " + round(impactPos:lat, 6) + "    " at (0, DEBUG_LINE+6).
+            print "lng: " + round(impactPos:lng, 6) + "    " at (0, DEBUG_LINE+7).
+        } else {
+            print "Trajectories impact position: not found" at (0, DEBUG_LINE+5).
+            print "                                  " at (0, DEBUG_LINE+6).
+            print "                                  " at (0, DEBUG_LINE+7).
+        }
     }
     
     wait 0.
