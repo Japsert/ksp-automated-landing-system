@@ -44,6 +44,8 @@ function drawDebugVec {
     ).
 }
 
+local bodyRotationPerStep is
+    2 * constant:pi / body:rotationPeriod * constant:radToDeg * DT.
 until false {
     local posVec is ship:position.
     local velVec is ship:velocity:orbit.
@@ -80,8 +82,6 @@ until false {
         local newAlt is body:altitudeOf(newPosVec).
         
         // Correct geocoordinates for body rotation
-        local bodyRotationPerStep is // should be precomputed
-            body:angularVel:mag * constant:radToDeg * DT.
         local bodyRotationSinceStart is bodyRotationPerStep * i.
         local correctedNewGeopos is 
             latLng(newGeopos:lat, newGeopos:lng - bodyRotationSinceStart).
