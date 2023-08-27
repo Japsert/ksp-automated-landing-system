@@ -11,7 +11,7 @@ global runName is "RK2, no drag, dt=2".
 if DO_LOG log "--- " + runName to logPath. // new run marker
 
 global DEBUG_LINE is 10.
-global VAR_LINE is 22.
+global VAR_LINE is 20.
 
 global errorBuffer is list().
 global ERROR_LINE is 26.
@@ -69,16 +69,12 @@ global start is time:seconds.
 local tr is addons:tr.
 until false {
     local drawDebugVectorsThisIteration is drawDebugVectors.
-    //local impactRK1 is getImpactPos(
-    //    ship:position, ship:velocity:orbit, "RK1", drawDebugVectorsThisIteration
-    //).
-    local impactRK2 is getImpactPos(
-        ship:position, ship:velocity:orbit, "RK2", drawDebugVectorsThisIteration
+    local impact is getImpactPos(
+        ship:position, ship:velocity:orbit, "RK1", drawDebugVectorsThisIteration
     ).
     set drawDebugVectors to false.
     
     // DEBUG: if impact found, draw vector to impact position and print coords
-    local impact is impactRK2.
     if impact:isFound {
         local impactPos is impact:geoposition.
         local impactAlt is impact:altitude.
@@ -124,8 +120,18 @@ until false {
 
 function calculateAcceleration {
     local parameter posVec.
-    local parameter velVec.
+    local parameter velVec. // orbital velocity
     local parameter accountForDrag.
+    local parameter i is -1.
+    
+    // The velVec parameter is in the orbital frame, so we need to convert it
+    // to the surface frame to get the airspeed.
+    // Thanks to nuggreat for the explanation:
+    //  The cross product of the angular velocity vector of the body and the
+    //  radius vector to the position of that velocity vector will produce the
+    //  difference vector between orbital and surface.
+
+    local velVecSrf is velVec - vcrs(body:angularVel, posVec - body:position).
     
     // Calculate altitude
     local centerToPosVec is (posVec - body:position).
@@ -145,17 +151,31 @@ function calculateAcceleration {
                             / (constant:idealGas * temperature).
     local atmDensityKPa is atmDensity * constant:atmToKPa.
     
-    local sqrVelocity is velVec:sqrMagnitude.
+    local sqrVelocity is velVecSrf:sqrmagnitude.
     
     local bulkModulus is staticPressure * body:atm:adiabaticIndex.
     local speedOfSound is sqrt(bulkModulus / atmDensity).
-    local vel is velVec:mag.
+    local vel is velVecSrf:mag.
     local machNumber is vel / speedOfSound.
     local CdA is lookUpCdA(machNumber).
     
     local dragForce is 1/2 * atmDensityKPa * sqrVelocity * CdA. // kN
-    local dragAcc is dragForce / ship:mass. // constant mass, no burn yet
-    local dragAccVec is dragAcc * -velVec:normalized.
+    local dragAcc is dragForce / mass. // constant mass, no burn yet
+    local dragAccVec is dragAcc * -velVecSrf:normalized.
+    
+    // DEBUG: print variables
+    if i = 1 printVars(list(
+        list("alt", alt_, "m"),
+        list("temperature", temperature, "K"),
+        list("staticPressure", staticPressure, "Pa"),
+        list("atmDensityKPa", atmDensityKPa, "kg/km^3"),
+        list("speedOfSound", speedOfSound, "m/s"),
+        list("vel", vel, "m/s"),
+        list("machNumber", machNumber, ""),
+        list("CdA", CdA, "m^2"),
+        list("dragForce", dragForce, "kN"),
+        list("dragAcc", dragAcc, "m/s^2")
+    )).
     
     return gravAccVec + dragAccVec.
 }
@@ -166,8 +186,9 @@ function calculateAcceleration {
 function updatePosVelRK1 {
     local parameter posVec.
     local parameter velVec.
+    local parameter i is -1. // DEBUG
     
-    local accVec is calculateAcceleration(posVec, velVec, false).
+    local accVec is calculateAcceleration(posVec, velVec, true, i).
     
     // Calculate vector pointing to next position (starting from current
     // position vector)
@@ -287,7 +308,7 @@ function getImpactPos {
         // Determine new position vector and velocity vector based on current state
         local newPosVel is lexicon().
         if integrationMethod = "RK1"
-            set newPosVel to updatePosVelRK1(posVec, velVec).
+            set newPosVel to updatePosVelRK1(posVec, velVec, i).
         else if integrationMethod = "RK2"
             set newPosVel to updatePosVelRK2(posVec, velVec).
         else
@@ -299,7 +320,7 @@ function getImpactPos {
         // Convert position vector to geoposition/altitude and correct for body rotation
         local newGeopos is body:geopositionOf(newPosVec).
         local newAlt is body:altitudeOf(newPosVec).
-        local bodyRotationPerStep is body:angularVel:mag * constant:radToDeg * TIME_STEP. // TODO: precompute
+        local bodyRotationPerStep is body:angularVel:mag * constant:radToDeg * TIME_STEP. // TODO: precompute using body:rotationPeriod (see debug_v2.ks)
         local bodyRotationSinceStart is bodyRotationPerStep * i.
         local correctedNewGeopos is latLng(newGeopos:lat, newGeopos:lng - bodyRotationSinceStart).
         
