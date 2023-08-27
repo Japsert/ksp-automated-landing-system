@@ -2,12 +2,8 @@
 clearScreen.
 clearVecDraws().
 
-local angvel is 0.
-until false {
-    local newangvel is body:angularvel:mag.
-    if newangvel <> angvel {
-        print newangvel.
-    }.
-    set angvel to newangvel.
-    wait 0.
-}
+local c is opcodesLeft.
+print "Hello, world!" at (10, 10).
+set c to c - opcodesLeft - 3.
+
+print c.
