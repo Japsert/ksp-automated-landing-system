@@ -35,6 +35,154 @@ global TIME_STEP is 5.
 global MAX_ITERATIONS is 150.
 
 
+local tempLookupTable is list(
+    lexicon(
+        "start", 0,
+        "end", 8814,
+        "x^3", 2.7706e-11,
+        "x^2", -4.3756e-07,
+        "x^1", -8.1137e-03,
+        "x^0", 309.6642
+    ),
+    lexicon(
+        "start", 8814,
+        "end", 16048,
+        "x^2", 8.6216e-08,
+        "x^1", -3.0887e-03,
+        "x^0", 243.8136
+    ),
+    lexicon(
+        "start", 16048,
+        "end", 25735,
+        "x^1", 1.2399e-03,
+        "x^0", 196.7535
+    ),
+    lexicon(
+        "start", 25735,
+        "end", 37877,
+        "x^3", -4.8140e-12,
+        "x^2", 4.5867e-07,
+        "x^1", -1.0577e-02,
+        "x^0", 279.1508
+    ),
+    lexicon(
+        "start", 37877,
+        "end", 41120,
+        "x^0", 274.9698
+    ),
+    lexicon(
+        "start", 41120,
+        "end", 57439,
+        "x^1", -3.4328e-03,
+        "x^0", 416.1255
+    ),
+    lexicon(
+        "start", 57439,
+        "end", 61412,
+        "x^3", -7.5739e-11,
+        "x^2", 1.3956e-05,
+        "x^1", -8.5603e-01,
+        "x^0", 17697.6256
+    ),
+    lexicon(
+        "start", 61412,
+        "end", 63440,
+        "x^3", -7.5735e-11,
+        "x^2", 1.3955e-05,
+        "x^1", -8.5596e-01,
+        "x^0", 17695.7926
+    ),
+    lexicon(
+        "start", 63440,
+        "end", 68792,
+        "x^3", 2.1427e-11,
+        "x^2", -4.4821e-06,
+        "x^1", 3.1011e-01,
+        "x^0", -6884.9892
+    ),
+    lexicon(
+        "start", 68792,
+        "end", 70000,
+        "x^0", 212.9276
+    )
+).
+
+local cdaLookupTable is list(
+    lexicon(
+        "start", 0.0,
+        "end", 0.85,
+        "x^2", -0.0951,
+        "x^1", -0.0844,
+        "x^0", 1.4157
+    ),
+    lexicon(
+        "start", 0.85,
+        "end", 1.1,
+        "x^3", -177.5173,
+        "x^2", 517.6693,
+        "x^1", -495.1551,
+        "x^0", 157.1451
+    ),
+    lexicon(
+        "start", 1.1,
+        "end", 2.0,
+        "x^3", 2.3121,
+        "x^2", -10.8694,
+        "x^1", 15.5400,
+        "x^0", -4.4169
+    ),
+    lexicon(
+        "start", 2.0,
+        "end", 2.5,
+        "x^2", -0.0970,
+        "x^1", 0.4727,
+        "x^0", 1.1359
+    ),
+    lexicon(
+        "start", 2.5,
+        "end", 3.25,
+        "x^2", 0.4388,
+        "x^1", -2.0210,
+        "x^0", 4.0144
+    ),
+    lexicon(
+        "start", 3.25,
+        "end", 4.25,
+        "x^2", -0.1858,
+        "x^1", 1.9329,
+        "x^0", -2.2326
+    ),
+    lexicon(
+        "start", 4.25,
+        "end", 5.0,
+        "x^2", 0.7075,
+        "x^1", -5.6143,
+        "x^0", 13.7052
+    ),
+    lexicon(
+        "start", 5.0,
+        "end", 6.0,
+        "x^2", -0.3785,
+        "x^1", 4.9739,
+        "x^0", -12.0977
+    ),
+    lexicon(
+        "start", 6.0,
+        "end", 6.35,
+        "x^2", -10.0028,
+        "x^1", 127.2061,
+        "x^0", -398.8970
+    ),
+    lexicon(
+        "start", 6.35,
+        "end", 6.8,
+        "x^2", -0.3580,
+        "x^1", 5.2814,
+        "x^0", -13.5545
+    )
+).
+
+
 // Checks if we should stage to be able to burn.
 // Returns true if there is an ignited engine, false if not.
 function shouldStage {
@@ -342,6 +490,7 @@ function getImpactPos {
         local srfPosVec is correctedGeopos:altitudePosition(alt_).
         local newSrfPosVec is correctedNewGeopos:altitudePosition(newAlt).
         local vecToNewPos is newSrfPosVec - srfPosVec.
+        if drawDebugVecs drawDebugVec(correctedGeopos, alt_, vecToNewPos, i).
 
         // Set position vector and velocity vector for next iteration
         set posVec to newPosVec.
@@ -371,79 +520,7 @@ function lookUpTemp {
         return lookUpTemp(0).
     }
     
-    local lookupTable is list(
-        lexicon(
-            "start", 0,
-            "end", 8814,
-            "x^3", 2.7706e-11,
-            "x^2", -4.3756e-07,
-            "x^1", -8.1137e-03,
-            "x^0", 309.6642
-        ),
-        lexicon(
-            "start", 8814,
-            "end", 16048,
-            "x^2", 8.6216e-08,
-            "x^1", -3.0887e-03,
-            "x^0", 243.8136
-        ),
-        lexicon(
-            "start", 16048,
-            "end", 25735,
-            "x^1", 1.2399e-03,
-            "x^0", 196.7535
-        ),
-        lexicon(
-            "start", 25735,
-            "end", 37877,
-            "x^3", -4.8140e-12,
-            "x^2", 4.5867e-07,
-            "x^1", -1.0577e-02,
-            "x^0", 279.1508
-        ),
-        lexicon(
-            "start", 37877,
-            "end", 41120,
-            "x^0", 274.9698
-        ),
-        lexicon(
-            "start", 41120,
-            "end", 57439,
-            "x^1", -3.4328e-03,
-            "x^0", 416.1255
-        ),
-        lexicon(
-            "start", 57439,
-            "end", 61412,
-            "x^3", -7.5739e-11,
-            "x^2", 1.3956e-05,
-            "x^1", -8.5603e-01,
-            "x^0", 17697.6256
-        ),
-        lexicon(
-            "start", 61412,
-            "end", 63440,
-            "x^3", -7.5735e-11,
-            "x^2", 1.3955e-05,
-            "x^1", -8.5596e-01,
-            "x^0", 17695.7926
-        ),
-        lexicon(
-            "start", 63440,
-            "end", 68792,
-            "x^3", 2.1427e-11,
-            "x^2", -4.4821e-06,
-            "x^1", 3.1011e-01,
-            "x^0", -6884.9892
-        ),
-        lexicon(
-            "start", 68792,
-            "end", 70000,
-            "x^0", 212.9276
-        )
-    ).
-    
-    for segment in lookupTable {
+    for segment in tempLookupTable {
         if alt_ >= segment:start and alt_ < segment:end {
             local returnValue is 0.
             if segment:hasKey("x^3")
@@ -479,82 +556,7 @@ function lookUpCdA {
         return lookUpCdA(6.799).
     }
     
-    local lookupTable is list(
-        lexicon(
-            "start", 0.0,
-            "end", 0.85,
-            "x^2", -0.0951,
-            "x^1", -0.0844,
-            "x^0", 1.4157
-        ),
-        lexicon(
-            "start", 0.85,
-            "end", 1.1,
-            "x^3", -177.5173,
-            "x^2", 517.6693,
-            "x^1", -495.1551,
-            "x^0", 157.1451
-        ),
-        lexicon(
-            "start", 1.1,
-            "end", 2.0,
-            "x^3", 2.3121,
-            "x^2", -10.8694,
-            "x^1", 15.5400,
-            "x^0", -4.4169
-        ),
-        lexicon(
-            "start", 2.0,
-            "end", 2.5,
-            "x^2", -0.0970,
-            "x^1", 0.4727,
-            "x^0", 1.1359
-        ),
-        lexicon(
-            "start", 2.5,
-            "end", 3.25,
-            "x^2", 0.4388,
-            "x^1", -2.0210,
-            "x^0", 4.0144
-        ),
-        lexicon(
-            "start", 3.25,
-            "end", 4.25,
-            "x^2", -0.1858,
-            "x^1", 1.9329,
-            "x^0", -2.2326
-        ),
-        lexicon(
-            "start", 4.25,
-            "end", 5.0,
-            "x^2", 0.7075,
-            "x^1", -5.6143,
-            "x^0", 13.7052
-        ),
-        lexicon(
-            "start", 5.0,
-            "end", 6.0,
-            "x^2", -0.3785,
-            "x^1", 4.9739,
-            "x^0", -12.0977
-        ),
-        lexicon(
-            "start", 6.0,
-            "end", 6.35,
-            "x^2", -10.0028,
-            "x^1", 127.2061,
-            "x^0", -398.8970
-        ),
-        lexicon(
-            "start", 6.35,
-            "end", 6.8,
-            "x^2", -0.3580,
-            "x^1", 5.2814,
-            "x^0", -13.5545
-        )
-    ).
-    
-    for segment in lookupTable {
+    for segment in cdaLookupTable {
         if machNumber >= segment:start and machNumber < segment:end {
             local returnValue is 0.
             if segment:hasKey("x^3")
