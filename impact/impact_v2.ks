@@ -7,7 +7,7 @@ local parameter DO_LOG is false.
 
 // Logging and debugging
 global logPath is "0:/impact/impact.log".
-global runName is "RK2, no drag, dt=2".
+global runName is "RK2, drag, dt=5".
 if DO_LOG log "--- " + runName to logPath. // new run marker
 
 global DEBUG_LINE is 10.
@@ -31,7 +31,7 @@ when terminal:input:hasChar then {
 
 
 // Constants
-global TIME_STEP is 2.
+global TIME_STEP is 5.
 global MAX_ITERATIONS is 150.
 
 
@@ -70,7 +70,7 @@ local tr is addons:tr.
 until false {
     local drawDebugVectorsThisIteration is drawDebugVectors.
     local impact is getImpactPos(
-        ship:position, ship:velocity:orbit, "RK1", drawDebugVectorsThisIteration
+        ship:position, ship:velocity:orbit, "RK2", drawDebugVectorsThisIteration
     ).
     set drawDebugVectors to false.
     
@@ -104,7 +104,7 @@ until false {
     if tr:available {
         if tr:hasImpact {
             local impactPos is tr:impactPos.
-            print "Trajectories impact position:" at (0, DEBUG_LINE+5).
+            print "Trajectories impact position:          " at (0, DEBUG_LINE+5).
             print "lat: " + round(impactPos:lat, 6) + "    " at (0, DEBUG_LINE+6).
             print "lng: " + round(impactPos:lng, 6) + "    " at (0, DEBUG_LINE+7).
         } else {
@@ -121,7 +121,7 @@ until false {
 function calculateAcceleration {
     local parameter posVec.
     local parameter velVec. // orbital velocity
-    local parameter accountForDrag.
+    local parameter accountForDrag is true.
     local parameter i is -1.
     
     // The velVec parameter is in the orbital frame, so we need to convert it
@@ -212,7 +212,7 @@ function updatePosVelRK2 {
     local parameter velVec.
     
     // Acceleration at the start of the interval
-    local accVecStart is calculateAcceleration(posVec, velVec, false).
+    local accVecStart is calculateAcceleration(posVec, velVec, true).
     
     // Position vector and velocity vector at end of time step
     local positionChangeVecTemp is
@@ -221,7 +221,7 @@ function updatePosVelRK2 {
     local velVecEnd is velVec + accVecStart * TIME_STEP.
     
     // Acceleration at end of time step
-    local accVecEnd is calculateAcceleration(posVecEnd, velVecEnd, false).
+    local accVecEnd is calculateAcceleration(posVecEnd, velVecEnd, true).
     
     // Average accelerations
     local accVecAvg is (accVecStart + accVecEnd) / 2.
@@ -342,7 +342,6 @@ function getImpactPos {
         local srfPosVec is correctedGeopos:altitudePosition(alt_).
         local newSrfPosVec is correctedNewGeopos:altitudePosition(newAlt).
         local vecToNewPos is newSrfPosVec - srfPosVec.
-        if drawDebugVecs drawDebugVec(correctedGeopos, alt_, vecToNewPos, i).
 
         // Set position vector and velocity vector for next iteration
         set posVec to newPosVec.
