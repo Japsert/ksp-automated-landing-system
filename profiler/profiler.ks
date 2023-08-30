@@ -12,6 +12,7 @@ function getInstructionCount {
     return count.
 }
 
+local vec is v(0,0,0).
 print(getInstructionCount({
-    // Code to profile here
+    vec:normalized.
 })).

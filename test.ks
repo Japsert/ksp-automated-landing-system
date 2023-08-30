@@ -2,8 +2,4 @@
 clearScreen.
 clearVecDraws().
 
-local c is opcodesLeft.
-print "Hello, world!" at (10, 10).
-set c to c - opcodesLeft - 3.
-
-print c.
+print ship:engines[0]:possibleThrustAt(body:atm:altitudePressure(ship:altitude)) / mass.
