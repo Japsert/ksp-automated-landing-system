@@ -218,7 +218,7 @@ local tr is addons:tr.
 until false {
     local drawDebugVectorsThisIteration is drawDebugVectors.
     local impact is getImpactPos(
-        ship:position, ship:velocity:orbit, "RK2", drawDebugVectorsThisIteration
+        ship:position, ship:velocity:orbit, "RK4", drawDebugVectorsThisIteration
     ).
     set drawDebugVectors to false.
     
@@ -386,6 +386,37 @@ function updatePosVelRK2 {
     ).
 }
 
+function updatePosVelRK4 {
+    local parameter posVec.
+    local parameter velVec.
+    
+    local accVec1 is calculateAcceleration(posVec, velVec, true).
+    local posVec1 is posVec + velVec * TIME_STEP / 2.
+    local velVec1 is velVec + accVec1 * TIME_STEP / 2.
+    
+    local accVec2 is calculateAcceleration(posVec1, velVec1, true).
+    local posVec2 is posVec + velVec1 * TIME_STEP / 2.
+    local velVec2 is velVec + accVec2 * TIME_STEP / 2.
+    
+    local accVec3 is calculateAcceleration(posVec2, velVec2, true).
+    local posVec3 is posVec + velVec2 * TIME_STEP.
+    local velVec3 is velVec + accVec3 * TIME_STEP.
+    
+    local accVec4 is calculateAcceleration(posVec3, velVec3, true).
+    
+    local posVecEnd is posVec + TIME_STEP / 6 * (
+        velVec + 2 * velVec1 + 2 * velVec2 + velVec3
+    ).
+    local velVecEnd is velVec + TIME_STEP / 6 * (
+        accVec1 + 2 * accVec2 + 2 * accVec3 + accVec4
+    ).
+    
+    return lexicon(
+        "position", posVecEnd,
+        "velocity", velVecEnd
+    ).
+}
+
 
 // If the given location (pos/alt) is below the surface, interpolates between
 // the previous location and the new location to estimate the actual impact
@@ -459,6 +490,8 @@ function getImpactPos {
             set newPosVel to updatePosVelRK1(posVec, velVec, i).
         else if integrationMethod = "RK2"
             set newPosVel to updatePosVelRK2(posVec, velVec).
+        else if integrationMethod = "RK4"
+            set newPosVel to updatePosVelRK4(posVec, velVec).
         else
             printError("Invalid integration method '" + integrationMethod + "'. Using RK2.").
             set newPosVel to updatePosVelRK2(posVec, velVec).
