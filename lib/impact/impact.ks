@@ -3,20 +3,40 @@
 
 @lazyGlobal off.
 
+// DEBUG
+local drawImpactDebugVecs is false.
+local drawLandingDebugVecs is false.
+when terminal:input:hasChar then {
+    local c is terminal:input:getChar().
+    if c = "q" {
+        set drawImpactDebugVecs to true.
+    } else if c = "w" {
+        set drawLandingDebugVecs to true.
+    } else if c = "c" {
+        clearVecDraws().
+    }
+    preserve.
+}
+
 // Impact predictor class
 function ImpactPredictor {
     
     // Constructor
-    local dT is 2.
+    local dT is 15.
+    local halfDT is dT / 2.
+    local sixthDT is dT / 6.
     local burnDT is 1.
-    local parameter maxIterations is 250.
-    local parameter maxBurnIterations is 100.
+    local parameter maxIterations is 100.
+    local parameter maxBurnIterations is 20.
     local bodyRotationPerStep is
         2 * constant:pi / body:rotationPeriod * constant:radToDeg * dT.
+    local bodyRotationPerBurnStep is
+        2 * constant:pi / body:rotationPeriod * constant:radToDeg * burnDT.
     local mu is body:mu.
     local atm is body:atm.
     local atmMolarMass is atm:molarMass.
     local atmAdbIdx is atm:adiabaticIndex.
+    local atmHeight is atm:height.
     local idealGas is constant:idealGas.
     local atmToKPa is constant:atmToKPa.
     local engine is ship:engines[0].
@@ -188,7 +208,7 @@ function ImpactPredictor {
             }
         }
         // DEBUG
-        print "ERROR: Temperature lookup failed. Altitude: " + alt_ + "m".
+        if alt_ < 0 print "ERROR: Temperature lookup failed. Altitude: " + alt_ + "m".
         return 0.
     }
     
@@ -216,7 +236,7 @@ function ImpactPredictor {
         return 0.
     }
     
-    function getAcc { // TODO: optimize
+    function getAccVec { // TODO: optimize
         local parameter posVec.
         local parameter velVec. // orbital velocity
         
@@ -230,30 +250,34 @@ function ImpactPredictor {
         local g is mu / centerToPosVec:sqrMagnitude.
         local gravAccVec is g * -centerToPosVec:normalized.
         
-        // Drag
-        local staticPressure is atm:altitudePressure(alt_).
-        local atmDensityAtm is
-            (staticPressure * atmMolarMass) / (idealGas * lookUpTemp(alt_)).
-        local atmDensityKPa is atmDensityAtm * atmToKPa.
+        if alt_ >= atmHeight return gravAccVec.
         
-        local CdA is lookUpCdA(
-            velVecSrf:mag / sqrt(staticPressure * atmAdbIdx / atmDensityAtm)
-        ).
+        //// Drag
+        //local staticPressure is atm:altitudePressure(alt_).
+        //local atmDensityAtm is
+        //    (staticPressure * atmMolarMass) / (idealGas * lookUpTemp(alt_)).
+        //local atmDensityKPa is atmDensityAtm * atmToKPa.
         
-        local dragAcc is 0.5 * atmDensityKPa * velVecSrf:sqrMagnitude * CdA.
-        local dragAccVec is dragAcc * -velVecSrf:normalized.
+        //local CdA is lookUpCdA(
+        //    velVecSrf:mag / sqrt(staticPressure * atmAdbIdx / atmDensityAtm)
+        //).
         
-        return gravAccVec + dragAccVec.
+        //local dragAcc is 0.5 * atmDensityKPa * velVecSrf:sqrMagnitude * CdA.
+        //local dragAccVec is dragAcc * -velVecSrf:normalized.
+        
+        //return gravAccVec + dragAccVec.
+        
+        return gravAccVec.
     }
 
     function getImpactPos {
         parameter initialPosVec.
-        parameter initialVelVec.
+        parameter initialVelVec. // orbital velocity
         
         local posVec is initialPosVec.
         local velVec is initialVelVec.
-        local alt_ is body:altitudeOf(initialPosVec).
         local geopos is body:geopositionOf(initialPosVec).
+        local alt_ is body:altitudeOf(initialPosVec).
         
         local i is 0.
         local reachedGround is false.
@@ -262,27 +286,31 @@ function ImpactPredictor {
         local impactGeopos is false.
         local impactAlt is false.
         
+        // DEBUG
+        local drawDebugVectorsThisIteration is drawLandingDebugVecs.
+        
         until reachedGround or maxIterationsReached {
             set i to i + 1.
             
-            // Update position and velocity
-            // RK1
-            local accVec is getAcc(posVec, velVec).
-            local newPosVec is posVec + velVec * dT + 0.5 * accVec * dT^2.
-            local newVelVec is velVec + accVec * dT.
+            // Update position and velocity using RK4
+            local k1VelVec is velVec.
+            local k1AccVec is getAccVec(posVec, k1VelVec).
+            local k2VelVec is velVec + k1AccVec * halfDT.
+            local k2AccVec is getAccVec(posVec + k1VelVec * halfDT, k2VelVec).
+            local k3VelVec is velVec + k2AccVec * halfDT.
+            local k3AccVec is getAccVec(posVec + k2VelVec * halfDT, k3VelVec).
+            local k4VelVec is velVec + k3AccVec * dT.
+            local k4AccVec is getAccVec(posVec + k3VelVec * dT, k4VelVec).
             
-            // RK2
-            
-            
-            // RK4
-            
-            
+            local newPosVec is
+                posVec + sixthDT * (k1VelVec + 2 * k2VelVec + 2 * k3VelVec + k4VelVec).
+            local newVelVec is
+                velVec + sixthDT * (k1AccVec + 2 * k2AccVec + 2 * k3AccVec + k4AccVec).
             
             // Convert to geocoordinates/altitude, and correct for body rotation
             local newGeopos is body:geopositionOf(newPosVec).
             local newAlt is body:altitudeof(newPosVec).
-            set newGeopos to
-                latLng(newGeopos:lat, newGeopos:lng - bodyRotationPerStep * i).
+            set newGeopos to latLng(newGeopos:lat, newGeopos:lng - bodyRotationPerStep * i).
             
             // Check for impact
             if newAlt < max(newGeopos:terrainHeight, 0) {
@@ -290,8 +318,7 @@ function ImpactPredictor {
                 // Interpolate impact position
                 local newGeoposSurfaceAlt is max(newGeopos:terrainHeight, 0).
                 local oldGeoposSurfaceAlt is max(geopos:terrainHeight, 0).
-                local averageSurfaceAlt is
-                    (oldGeoposSurfaceAlt + newGeoposSurfaceAlt) / 2.
+                local averageSurfaceAlt is (oldGeoposSurfaceAlt + newGeoposSurfaceAlt) / 2.
                 local altRatio is (alt_ - averageSurfaceAlt) / (alt_ - newAlt).
                 set impactGeopos to latLng(
                     geopos:lat + (newGeopos:lat - geopos:lat) * altRatio,
@@ -303,12 +330,20 @@ function ImpactPredictor {
             // Check for max iterations
             if i >= maxIterations set maxIterationsReached to true.
             
+            // DEBUG
+            if drawDebugVectorsThisIteration drawDebugVec(
+                newGeopos, newAlt, geopos, alt_, red, i
+            ).
+            
             // Update variables
             set posVec to newPosVec.
             set velVec to newVelVec.
             set geopos to newGeopos.
             set alt_ to newAlt.
         }
+        
+        // DEBUG
+        set drawLandingDebugVecs to false.
         
         return lexicon(
             "isFound", reachedGround,
@@ -321,35 +356,56 @@ function ImpactPredictor {
         local parameter posVec.
         local parameter velVec. // orbital velocity
         
-        // Convert non-inertial velocity to inertial velocity
-        local velVecSrf is velVec - vCrs(body:angularVel, posVec - body:position).
-        
-        // Gravity
         local centerToPosVec is posVec - body:position.
         local alt_ is centerToPosVec:mag - body:radius.
         
+        // Convert non-inertial velocity to inertial velocity
+        local velVecSrf is velVec - vCrs(body:angularVel, centerToPosVec).
+        
+        // Gravity
         local g is mu / centerToPosVec:sqrMagnitude.
         local gravAccVec is g * -centerToPosVec:normalized.
         
-        // Drag
-        local staticPressure is atm:altitudePressure(alt_).
-        local atmDensityAtm is
-            (staticPressure * atmMolarMass) / (idealGas * lookUpTemp(alt_)).
-        local atmDensityKPa is atmDensityAtm * atmToKPa.
-        
-        local CdA is lookUpCdA(
-            velVecSrf:mag / sqrt(staticPressure * atmAdbIdx / atmDensityAtm)
-        ).
-        
-        local dragAcc is 
-            0.5 * atmDensityKPa * velVecSrf:sqrMagnitude * CdA.
-        local dragAccVec is dragAcc * -velVecSrf:normalized.
-        
         // Thrust
+        local staticPressure is atm:altitudePressure(alt_).
         local thrustAcc is engine:possibleThrustAt(staticPressure) / mass.
         local thrustAccVec is thrustAcc * -velVecSrf:normalized.
         
-        return gravAccVec + dragAccVec + thrustAccVec.
+        if alt_ >= atmHeight return gravAccVec + thrustAccVec.
+        
+        // Drag
+        //local atmDensityAtm is
+        //    (staticPressure * atmMolarMass) / (idealGas * lookUpTemp(alt_)).
+        //local atmDensityKPa is atmDensityAtm * atmToKPa.
+        
+        //local CdA is lookUpCdA(
+        //    velVecSrf:mag / sqrt(staticPressure * atmAdbIdx / atmDensityAtm)
+        //).
+        
+        //local dragAcc is 
+        //    0.5 * atmDensityKPa * velVecSrf:sqrMagnitude * CdA.
+        //local dragAccVec is dragAcc * -velVecSrf:normalized.
+        
+        //return gravAccVec + dragAccVec + thrustAccVec.
+        return gravAccVec + thrustAccVec.
+    }
+    
+    // DEBUG
+    function drawDebugVec {
+        local parameter newgeopos.
+        local parameter newalt.
+        local parameter geopos.
+        local parameter alt_.
+        local parameter color.
+        local parameter i.
+        
+        local vecToNewPos is newgeopos:altitudePosition(newalt).
+        local vecToOldPos is geopos:altitudePosition(alt_).
+        local vec is vecToNewPos - vecToOldPos.
+        vecDraw(
+            { return geopos:altitudePosition(alt_). },
+            vec, color, i, 1, true
+        ).
     }
     
     function getLandingPos {
@@ -367,26 +423,38 @@ function ImpactPredictor {
         local landingAlt is false.
         local burnStartAlt is false.
         
+        // DEBUG
+        local drawDebugVectorsThisIteration is drawImpactDebugVecs.
+        
         until landed or maxIterationsReached {
             set i to i + 1.
             
-            // Update position and velocity
-            // RK1
-            local accVec is getAcc(posVec, velVec).
-            local newPosVec is posVec + velVec * dT + 0.5 * accVec * dT^2.
-            local newVelVec is velVec + accVec * dT.
+            // Update position and velocity using RK4
+            local k1VelVec is velVec.
+            local k1AccVec is getAccVec(posVec, k1VelVec).
+            local k2VelVec is velVec + k1AccVec * halfDT.
+            local k2AccVec is getAccVec(posVec + k1VelVec * halfDT, k2VelVec).
+            local k3VelVec is velVec + k2AccVec * halfDT.
+            local k3AccVec is getAccVec(posVec + k2VelVec * halfDT, k3VelVec).
+            local k4VelVec is velVec + k3AccVec * dT.
+            local k4AccVec is getAccVec(posVec + k3VelVec * dT, k4VelVec).
             
-            // RK2
+            local newPosVec is
+                posVec + sixthDT * (k1VelVec + 2 * k2VelVec + 2 * k3VelVec + k4VelVec).
+            local newVelVec is
+                velVec + sixthDT * (k1AccVec + 2 * k2AccVec + 2 * k3AccVec + k4AccVec).
             
-            
-            // RK4
-            
-            
-            local shouldCalculateLandingBurn is true.
             // determine if we should calculate the landing burn
-            if shouldCalculateLandingBurn { // TODO
+            local shouldCalculateLandingBurn is true. // TODO
+            if shouldCalculateLandingBurn {
                 local burnPosVec is newPosVec.
                 local burnVelVec is newVelVec.
+                local burnGeopos is body:geopositionOf(burnPosVec). // DEBUG
+                local burnAlt is body:altitudeOf(burnPosVec). // DEBUG
+                set burnGeopos to latLng(
+                    burnGeopos:lat,
+                    burnGeopos:lng - bodyRotationPerStep * i
+                ). // DEBUG
                 
                 local j is 0.
                 local burnEnded is false.
@@ -401,33 +469,56 @@ function ImpactPredictor {
                         + 0.5 * burnAccVec * burnDT^2.
                     local newBurnVelVec is burnVelVec + burnAccVec * burnDT.
                     
-                    // Check for burn end
-                    if newBurnVelVec:mag >= burnVelVec:mag {
+                    // If the position is under the surface, stop iterating in
+                    // both the inner and outer loop
+                    local newBurnGeopos is body:geopositionOf(newBurnPosVec).
+                    local newBurnAlt is body:altitudeOf(newBurnPosVec).
+                    set newBurnGeopos to latLng(
+                        newBurnGeopos:lat,
+                        newBurnGeopos:lng
+                            - bodyRotationPerStep * i
+                            - bodyRotationPerBurnStep * j
+                    ).
+                    if newBurnAlt <= max(newBurnGeopos:terrainHeight, 0) {
                         set burnEnded to true.
-                        local newBurnGeopos is body:geopositionOf(newBurnPosVec).
-                        local newBurnAlt is body:altitudeOf(newBurnPosVec).
-                        set newBurnGeopos to latLng(
-                            newBurnGeopos:lat,
-                            newBurnGeopos:lng - bodyRotationPerStep * j
+                        set landed to true.
+                        // Interpolate landing position
+                        local newBurnGeoposSurfaceAlt is max(newBurnGeopos:terrainHeight, 0).
+                        local oldBurnGeoposSurfaceAlt is max(burnGeopos:terrainHeight, 0).
+                        local averageBurnSurfaceAlt is
+                            (oldBurnGeoposSurfaceAlt + newBurnGeoposSurfaceAlt) / 2.
+                        local altRatio is
+                            (burnAlt - averageBurnSurfaceAlt) / (burnAlt - newBurnAlt).
+                        set landingGeopos to latLng(
+                            burnGeopos:lat + (newBurnGeopos:lat - burnGeopos:lat) * altRatio,
+                            burnGeopos:lng + (newBurnGeopos:lng - burnGeopos:lng) * altRatio
                         ).
-                        // Check for landing
-                        if newBurnAlt <= max(newBurnGeopos:terrainHeight, 0) {
-                            set landed to true.
-                            // can't be bothered, just choose the new one
-                            set landingGeopos to newBurnGeopos.
-                            set landingAlt to newBurnAlt.
-                            set burnStartAlt to body:altitudeOf(newPosVec).
-                        }
+                        set landingAlt to max(landingGeopos:terrainHeight, 0).
+                        set burnStartAlt to body:altitudeOf(newPosVec).
                     }
+                    
+                    // If the velocity has come to a stop, stop iterating in
+                    // the inner loop
+                    if newBurnVelVec:mag >= burnVelVec:mag set burnEnded to true.
                     
                     // Check for max iterations
                     if j >= maxBurnIterations set maxBurnIterationsReached to true.
                     
+                    // DEBUG
+                    if drawDebugVectorsThisIteration and j = 0 drawDebugVec(
+                        newBurnGeopos, newBurnAlt, burnGeopos, burnAlt,
+                        yellow, j
+                    ).
+                    
                     // Update variables
                     set burnPosVec to newBurnPosVec.
                     set burnVelVec to newBurnVelVec.
+                    set burnGeopos to newBurnGeopos. // DEBUG
+                    set burnAlt to newBurnAlt. // DEBUG
                 }
             }
+            
+            // We don't have to check for impact
             
             // Check for max iterations
             if i >= maxIterations set maxIterationsReached to true.
@@ -437,6 +528,9 @@ function ImpactPredictor {
             set velVec to newVelVec.
         }
         
+        // DEBUG
+        set drawImpactDebugVecs to false.
+
         return lexicon(
             "isFound", landed,
             "geoposition", landingGeopos,
