@@ -27,7 +27,7 @@ function ImpactPredictor {
     local sixthDT is dT / 6.
     local burnDT is 1.
     local parameter maxIterations is 100.
-    local parameter maxBurnIterations is 20.
+    local parameter maxBurnIterations is 30.
     local bodyRotationPerStep is
         2 * constant:pi / body:rotationPeriod * constant:radToDeg * dT.
     local bodyRotationPerBurnStep is
@@ -280,7 +280,7 @@ function ImpactPredictor {
         local alt_ is body:altitudeOf(initialPosVec).
         
         local i is 0.
-        local reachedGround is false.
+        local reachedSurface is false.
         local maxIterationsReached is false.
         
         local impactGeopos is false.
@@ -289,7 +289,7 @@ function ImpactPredictor {
         // DEBUG
         local drawDebugVectorsThisIteration is drawLandingDebugVecs.
         
-        until reachedGround or maxIterationsReached {
+        until reachedSurface or maxIterationsReached {
             set i to i + 1.
             
             // Update position and velocity using RK4
@@ -314,7 +314,7 @@ function ImpactPredictor {
             
             // Check for impact
             if newAlt < max(newGeopos:terrainHeight, 0) {
-                set reachedGround to true.
+                set reachedSurface to true.
                 // Interpolate impact position
                 local newGeoposSurfaceAlt is max(newGeopos:terrainHeight, 0).
                 local oldGeoposSurfaceAlt is max(geopos:terrainHeight, 0).
@@ -346,13 +346,13 @@ function ImpactPredictor {
         set drawLandingDebugVecs to false.
         
         return lexicon(
-            "isFound", reachedGround,
+            "isFound", reachedSurface,
             "geoposition", impactGeopos,
             "altitude", impactAlt
         ).
     }
     
-    function getBurnAcc { // TODO: optimize
+    function getBurnAccVec { // TODO: optimize
         local parameter posVec.
         local parameter velVec. // orbital velocity
         
@@ -445,16 +445,14 @@ function ImpactPredictor {
                 velVec + sixthDT * (k1AccVec + 2 * k2AccVec + 2 * k3AccVec + k4AccVec).
             
             // determine if we should calculate the landing burn
-            local shouldCalculateLandingBurn is true. // TODO
+            local burnPosVec is newPosVec.
+            local burnVelVec is newVelVec.
+            local burnAlt is body:altitudeOf(burnPosVec).
+            local shouldCalculateLandingBurn is burnAlt <= 40000. // TODO
             if shouldCalculateLandingBurn {
-                local burnPosVec is newPosVec.
-                local burnVelVec is newVelVec.
-                local burnGeopos is body:geopositionOf(burnPosVec). // DEBUG
-                local burnAlt is body:altitudeOf(burnPosVec). // DEBUG
-                set burnGeopos to latLng(
-                    burnGeopos:lat,
-                    burnGeopos:lng - bodyRotationPerStep * i
-                ). // DEBUG
+                // Convert to geopos and correct for body rotation
+                local burnGeopos is body:geopositionOf(burnPosVec).
+                set burnGeopos to latLng(burnGeopos:lat, burnGeopos:lng - bodyRotationPerStep * i).
                 
                 local j is 0.
                 local burnEnded is false.
@@ -463,22 +461,19 @@ function ImpactPredictor {
                 until burnEnded or maxBurnIterationsReached {
                     set j to j + 1.
                     
-                    // Update position and velocity (RK1)
-                    local burnAccVec is getBurnAcc(burnPosVec, burnVelVec).
-                    local newBurnPosVec is burnPosVec + burnVelVec * burnDT
-                        + 0.5 * burnAccVec * burnDT^2.
+                    // Update position and velocity using Euler's method
+                    local burnAccVec is getBurnAccVec(burnPosVec, burnVelVec).
+                    local newBurnPosVec is
+                        burnPosVec + burnVelVec * burnDT + 0.5 * burnAccVec * burnDT^2.
                     local newBurnVelVec is burnVelVec + burnAccVec * burnDT.
                     
-                    // If the position is under the surface, stop iterating in
-                    // both the inner and outer loop
+                    // Convert to geopos/alt and correct for body rotation
                     local newBurnGeopos is body:geopositionOf(newBurnPosVec).
+                    set newBurnGeopos to latLng(newBurnGeopos:lat,
+                        newBurnGeopos:lng - bodyRotationPerStep * i - bodyRotationPerBurnStep * j).
                     local newBurnAlt is body:altitudeOf(newBurnPosVec).
-                    set newBurnGeopos to latLng(
-                        newBurnGeopos:lat,
-                        newBurnGeopos:lng
-                            - bodyRotationPerStep * i
-                            - bodyRotationPerBurnStep * j
-                    ).
+                    
+                    // If we are below the surface, interpolate to find exact landing position
                     if newBurnAlt <= max(newBurnGeopos:terrainHeight, 0) {
                         set burnEnded to true.
                         set landed to true.
@@ -497,15 +492,18 @@ function ImpactPredictor {
                         set burnStartAlt to body:altitudeOf(newPosVec).
                     }
                     
-                    // If the velocity has come to a stop, stop iterating in
-                    // the inner loop
-                    if newBurnVelVec:mag >= burnVelVec:mag set burnEnded to true.
+                    // If the velocity has come to a stop or the vertical velocity is zero or
+                    // positive, the burn has ended, but we haven't reached the surface.
+                    if newBurnVelVec:mag >= burnVelVec:mag
+                    // or (newBurnVelVec - // TODO: fix
+                        //vectorExclude(newBurnPosVec - body:position, newBurnVelVec)):mag >= 0
+                        set burnEnded to true.
                     
                     // Check for max iterations
                     if j >= maxBurnIterations set maxBurnIterationsReached to true.
                     
                     // DEBUG
-                    if drawDebugVectorsThisIteration and j = 0 drawDebugVec(
+                    if drawDebugVectorsThisIteration drawDebugVec(
                         newBurnGeopos, newBurnAlt, burnGeopos, burnAlt,
                         yellow, j
                     ).
@@ -518,7 +516,7 @@ function ImpactPredictor {
                 }
             }
             
-            // We don't have to check for impact
+            // We don't have to check for impact, that's done in the burn loop
             
             // Check for max iterations
             if i >= maxIterations set maxIterationsReached to true.

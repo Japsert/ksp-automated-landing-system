@@ -11,7 +11,7 @@
     2. if so:
         1. iteratively determine where we would end up if we fired the engines at this iteration, using Euler's method
         2. when an iteration's landing burn ends up under the ground:
-            1. do a binary search: use Euler's method to determine the end up position at time step / 2 after the previous iteration
-            2. if this is still under ground, go earlier, if not, go later, etc. until the difference is about 1 meter
-            3. stop all iteration and report the start altitude and end up geopos/alt!
+            1. return the final position using interpolation
+            2. stop all iteration and report the start altitude and end up geopos/alt!
 
+vertical speed is the magnitude of the velocity vector projected on the radial out (up) vector.
