@@ -4,10 +4,13 @@ clearVecDraws().
 
 // DEBUG
 local drawDebugVectors is false.
+local calcBurn is false.
 when terminal:input:hasChar then {
     local c is terminal:input:getChar().
     if c = "w" {
         set drawDebugVectors to true.
+    } else if C = "e" {
+        set calcBurn to true.
     } else if c = "c" {
         clearVecDraws().
     }
@@ -131,82 +134,69 @@ local halfDT is dT / 2.
 local sixthDT is dT / 6.
 local bodyRotationPerStep is 2 * constant:pi / body:rotationPeriod * constant:radToDeg * dT.
 local maxBurnIterations is 20.
-local burnDT is 5.
+local burnDT is 1.
 print "burn dt: " + burnDT + "s" at (0, 0).
 local bodyRotationPerBurnStep is 2 * constant:pi / body:rotationPeriod * constant:radToDeg * burnDT.
-local i is 0.
 until false {
-    set i to i + 1.
-    local drawDebugVectorsThisIteration is drawDebugVectors.
-    
-    // calculate the expected burn end location using RK4
-    local burnPosVec is ship:position.
-    local burnVelVec is ship:velocity:orbit.
-    local burnGeopos is body:geopositionOf(burnPosVec).
-    local burnAlt is body:altitudeOf(burnPosVec).
-    set burnGeopos to latLng(burnGeopos:lat, burnGeopos:lng - bodyRotationPerStep * i).
-    
-    local j is 0.
-    local burnEnded is false.
-    local maxBurnIterationsReached is false.
-    
-    until burnEnded or maxBurnIterationsReached {
-        set j to j + 1.
+    if calcBurn {
+        // iterate using euler to predict burn trajectory
+        local burnPosVec is ship:position.
+        local burnVelVec is ship:velocity:orbit.
+        local burnGeopos is body:geopositionOf(burnPosVec).
+        local burnAlt is body:altitudeOf(burnPosVec).
         
-        if j = 1 print "current lat/lng: " + round(burnGeopos:lat, 4) + ", " + round(burnGeopos:lng, 4) at (0, 5).
+        local i is 0.
+        local burnEnded is false.
         
-        // Update position and velocity using RK4
-        local k1VelVec is burnVelVec.
-        local k1AccVec is getBurnAccVec(burnPosVec, k1VelVec).
-        local k2VelVec is burnVelVec + k1AccVec * halfDT.
-        local k2AccVec is getBurnAccVec(burnPosVec + k1VelVec * halfDT, k2VelVec).
-        local k3VelVec is burnVelVec + k2AccVec * halfDT.
-        local k3AccVec is getBurnAccVec(burnPosVec + k2VelVec * halfDT, k3VelVec).
-        local k4VelVec is burnVelVec + k3AccVec * dT.
-        local k4AccVec is getBurnAccVec(burnPosVec + k3VelVec * dT, k4VelVec).
-        if drawDebugVectorsThisIteration and j = 1 {
-            vecDraw({ return burnGeopos:altitudePosition(burnAlt). }, k1VelVec, red, "", 1, true).
-            vecDraw({ return burnGeopos:altitudePosition(burnAlt). }, k2VelVec, green, "", 1, true).
-            vecDraw({ return burnGeopos:altitudePosition(burnAlt). }, k3VelVec, blue, "", 1, true).
-            vecDraw({ return burnGeopos:altitudePosition(burnAlt). }, k4VelVec, yellow, "", 1, true).
-        }
-        
-        print round(k1VelVec:mag, 2) + "m/s, " + round(k2VelVec:mag, 2) + "m/s, " +
-            round(k3VelVec:mag, 2) + "m/s, " + round(k4VelVec:mag, 2) + "m/s" at (0, 6).
-        local newBurnPosVec is
-            burnPosVec + sixthDT * (k1VelVec + 2 * k2VelVec + 2 * k3VelVec + k4VelVec).
-        if j = 1 print "after 1 iteration, next step is " + newBurnPosVec:mag + "m away" at (0, 10).
-        if drawDebugVectorsThisIteration and j = 1
-            vecDraw(ship:position, newBurnPosVec - ship:position, red, "", 1, true).
-        local newBurnVelVec is
-            burnVelVec + sixthDT * (k1AccVec + 2 * k2AccVec + 2 * k3AccVec + k4AccVec).
-        
-        // Check if position under surface
-        
-        if newBurnVelVec:mag >= burnVelVec:mag set burnEnded to true.
-        
-        if j >= maxBurnIterations set maxBurnIterationsReached to true.
-        
-        // DEBUG
-        local newBurnGeopos is body:geopositionOf(newBurnPosVec).
-        local newBurnAlt is body:altitudeOf(newBurnPosVec).
-        set newBurnGeopos to latLng(newBurnGeopos:lat,
-            newBurnGeopos:lng - bodyRotationPerStep * i - bodyRotationPerBurnStep * j).
-        if drawDebugVectorsThisIteration and j = 1
+        until burnEnded {
+            set i to i + 1.
+            
+            local burnAccVec is getBurnAccVec(burnPosVec, burnVelVec).
+            local newBurnPosVec is burnPosVec + burnVelVec * burnDT + 0.5 * burnAccVec * burnDT^2.
+            local newBurnVelVec is burnVelVec + burnAccVec * burnDT.
+            local newBurnGeopos is body:geopositionOf(newBurnPosVec).
+            set newBurnGeopos to latLng(newBurnGeopos:lat, newBurnGeopos:lng - bodyRotationPerBurnStep * i).
+            local newBurnAlt is body:altitudeOf(newBurnPosVec).
+            
+            // If we are below the surface, interpolate to find exact landing position
+            if newBurnAlt <= max(newBurnGeopos:terrainHeight, 0) {
+                print "impacted at " + newBurnGeopos + " after " + i + " iterations" at (0, 1).
+                set burnEnded to true.
+                // Interpolate landing position
+                local newBurnGeoposSurfaceAlt is max(newBurnGeopos:terrainHeight, 0).
+                local oldBurnGeoposSurfaceAlt is max(burnGeopos:terrainHeight, 0).
+                local averageBurnSurfaceAlt is
+                    (oldBurnGeoposSurfaceAlt + newBurnGeoposSurfaceAlt) / 2.
+                local altRatio is
+                    (burnAlt - averageBurnSurfaceAlt) / (burnAlt - newBurnAlt).
+                set landingGeopos to latLng(
+                    burnGeopos:lat + (newBurnGeopos:lat - burnGeopos:lat) * altRatio,
+                    burnGeopos:lng + (newBurnGeopos:lng - burnGeopos:lng) * altRatio
+                ).
+                set landingAlt to max(landingGeopos:terrainHeight, 0).
+                set burnStartAlt to body:altitudeOf(newPosVec).
+            }
+            
+            // If the velocity has come to a stop or the vertical velocity is zero or
+            // positive, the burn has ended, but we haven't reached the surface.
+            if newBurnVelVec:mag >= burnVelVec:mag  {
+            //or (newBurnVelVec - vectorExclude(newBurnPosVec - body:position, newBurnVelVec)):mag >= 0 {
+                print "burn ended after " + i + " iterations" at (0, 1).
+                set burnEnded to true.
+            }
+            
+            // DEBUG
             drawDebugVec(newBurnGeopos, newBurnAlt, burnGeopos, burnAlt, yellow).
-        
-        // Update variables
-        set burnPosVec to newBurnPosVec.
-        set burnVelVec to newBurnVelVec.
-        set burnGeopos to newBurnGeopos.
-        set burnAlt to newBurnAlt.
-    }
-    if burnEnded {
-        print "burn ended                 " at (0, 20).
-    } else if maxBurnIterationsReached {
-        print "max burn iterations reached" at (0, 20).
+            
+            // Update variables
+            set burnPosVec to newBurnPosVec.
+            set burnVelVec to newBurnVelVec.
+            set burnGeopos to newBurnGeopos.
+            set burnAlt to newBurnAlt.
+        }
     }
     
-    set drawDebugVectors to false.
+    set calcBurn to false.
+    
     wait 0.
 }
