@@ -287,7 +287,7 @@ function ImpactPredictor {
         local impactAlt is false.
         
         // DEBUG
-        local drawDebugVectorsThisIteration is drawLandingDebugVecs.
+        local drawDebugVectorsThisIteration is drawImpactDebugVecs.
         
         until reachedSurface or maxIterationsReached {
             set i to i + 1.
@@ -343,7 +343,7 @@ function ImpactPredictor {
         }
         
         // DEBUG
-        set drawLandingDebugVecs to false.
+        set drawImpactDebugVecs to false.
         
         return lexicon(
             "isFound", reachedSurface,
@@ -424,7 +424,7 @@ function ImpactPredictor {
         local burnStartAlt is false.
         
         // DEBUG
-        local drawDebugVectorsThisIteration is drawImpactDebugVecs.
+        local drawDebugVectorsThisIteration is drawLandingDebugVecs.
         
         until landed or maxIterationsReached {
             set i to i + 1.
@@ -527,7 +527,7 @@ function ImpactPredictor {
         }
         
         // DEBUG
-        set drawImpactDebugVecs to false.
+        set drawLandingDebugVecs to false.
 
         return lexicon(
             "isFound", landed,
