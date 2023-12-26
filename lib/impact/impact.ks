@@ -21,17 +21,17 @@ when terminal:input:hasChar then {
 // Impact predictor class
 function ImpactPredictor {
     
-    // Constructor
-    local dT is 15.
+    local targetIterations is 25.
+    local dT is 10.
     local halfDT is dT / 2.
     local sixthDT is dT / 6.
-    local burnDT is 1.
+    local burnDT is 2.
     local parameter maxIterations is 100.
     local parameter maxBurnIterations is 30.
-    local bodyRotationPerStep is
-        2 * constant:pi / body:rotationPeriod * constant:radToDeg * dT.
-    local bodyRotationPerBurnStep is
-        2 * constant:pi / body:rotationPeriod * constant:radToDeg * burnDT.
+    local bodyRotationPerSecond is
+        2 * constant:pi / body:rotationPeriod * constant:radToDeg.
+    local bodyRotationPerStep is bodyRotationPerSecond * dT.
+    local bodyRotationPerBurnStep is bodyRotationPerSecond * burnDT.
     local mu is body:mu.
     local atm is body:atm.
     local atmMolarMass is atm:molarMass.
@@ -325,10 +325,12 @@ function ImpactPredictor {
                     geopos:lng + (newGeopos:lng - geopos:lng) * altRatio
                 ).
                 set impactAlt to max(impactGeopos:terrainHeight, 0).
+                set i to i + altRatio.
             }
             
             // Check for max iterations
-            if i >= maxIterations set maxIterationsReached to true.
+            if i >= maxIterations
+                set maxIterationsReached to true.
             
             // DEBUG
             if drawDebugVectorsThisIteration drawDebugVec(
@@ -341,6 +343,17 @@ function ImpactPredictor {
             set geopos to newGeopos.
             set alt_ to newAlt.
         }
+        
+        // Update time step to reach target number of iterations
+        set dT to dT * (i / targetIterations).
+        if dT < 1
+            set dT to 1.
+        else if dT > 60
+            set dT to 60.
+        set bodyRotationPerStep to bodyRotationPerSecond * dT.
+        print "i: " + round(i, 2) + ", dT: " + round(dT, 2) + ", rotation: " + round(bodyRotationPerStep, 6).
+        set halfDT to dT / 2.
+        set sixthDT to dT / 6.
         
         // DEBUG
         set drawImpactDebugVecs to false.
