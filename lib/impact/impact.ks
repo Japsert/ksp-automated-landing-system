@@ -351,7 +351,6 @@ function ImpactPredictor {
         else if dT > 60
             set dT to 60.
         set bodyRotationPerStep to bodyRotationPerSecond * dT.
-        print "i: " + round(i, 2) + ", dT: " + round(dT, 2) + ", rotation: " + round(bodyRotationPerStep, 6).
         set halfDT to dT / 2.
         set sixthDT to dT / 6.
         
