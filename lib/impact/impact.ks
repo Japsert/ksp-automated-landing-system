@@ -250,9 +250,9 @@ function ImpactPredictor {
         local g is mu / centerToPosVec:sqrMagnitude.
         local gravAccVec is g * -centerToPosVec:normalized.
         
-        if alt_ >= atmHeight return gravAccVec.
+        //if alt_ >= atmHeight or alt_ < 0 return gravAccVec.
         
-        //// Drag
+        // Drag
         //local staticPressure is atm:altitudePressure(alt_).
         //local atmDensityAtm is
         //    (staticPressure * atmMolarMass) / (idealGas * lookUpTemp(alt_)).
@@ -333,9 +333,8 @@ function ImpactPredictor {
                 set maxIterationsReached to true.
             
             // DEBUG
-            if drawDebugVectorsThisIteration drawDebugVec(
-                newGeopos, newAlt, geopos, alt_, red, i
-            ).
+            if drawDebugVectorsThisIteration
+                drawDebugVec(newGeopos, newAlt, geopos, alt_, red, i).
             
             // Update variables
             set posVec to newPosVec.
@@ -420,7 +419,7 @@ function ImpactPredictor {
         ).
     }
     
-    function getLandingPos {
+    function getLandingPos { // TODO: not updated
         local parameter initialPosVec.
         local parameter initialVelVec.
         
