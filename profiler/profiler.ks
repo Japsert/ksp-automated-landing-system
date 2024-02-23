@@ -12,7 +12,8 @@ function getInstructionCount {
     return count.
 }
 
-local vec is v(0,0,0).
+local l is list(1, 2, 3, 4, 5, 6).
+local i is 3.
 print(getInstructionCount({
-    vec:normalized.
+    local value is l[i].
 })).

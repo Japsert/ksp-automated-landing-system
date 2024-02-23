@@ -19,14 +19,20 @@ ship:mass.
 // Creating a variable costs the same as setting one.
 // 2
 local x is 0.
-// 3
+// 2
 set x to 0.
 
-// Even if you don't store the result in a variable, the CPU will still store it
-// somewhere.
+// Even if you don't store the result in a variable, the CPU will still store it somewhere.
 // 2
 local a is altitude.
 // 2
 altitude.
 
 // Storing a value in a variable takes 1 instruction.
+
+// 3
+local l is list().
+// 6
+l:add(1).
+// 4
+local value is l[i].
