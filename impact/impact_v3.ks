@@ -24,21 +24,21 @@ until false {
         print "no impact found" at (0, 10).
     }
     
-    // landing prediction
-    local landing is impactPredictor:getLandingPos(
-        ship:position, ship:velocity:orbit
-    ).
-    if landing:isFound {
-        set vecLanding to vecDraw(ship:position, landing:geoposition:altitudePosition(landing:altitude), green, "landing", 1, true).
-        print "landing at lat "
-            + round(landing:geoposition:lat, 6) + " lon "
-            + round(landing:geoposition:lng, 6) + " alt "
-            + round(landing:altitude, 2) + "m (start alt "
-            + round(landing:startAltitude) + "m)                    "
-            at (0, 13).
-    } else {
-        print "no landing found" at (0, 13).
-    }
+    //// landing prediction
+    //local landing is impactPredictor:getLandingPos(
+    //    ship:position, ship:velocity:orbit
+    //).
+    //if landing:isFound {
+    //    set vecLanding to vecDraw(ship:position, landing:geoposition:altitudePosition(landing:altitude), green, "landing", 1, true).
+    //    print "landing at lat "
+    //        + round(landing:geoposition:lat, 6) + " lon "
+    //        + round(landing:geoposition:lng, 6) + " alt "
+    //        + round(landing:altitude, 2) + "m (start alt "
+    //        + round(landing:startAltitude) + "m)                    "
+    //        at (0, 13).
+    //} else {
+    //    print "no landing found" at (0, 13).
+    //}
     wait 0.
 }
 
