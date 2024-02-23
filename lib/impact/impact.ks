@@ -269,6 +269,24 @@ function ImpactPredictor {
         
         return gravAccVec.
     }
+        
+    // DEBUG
+    function drawDebugVec {
+        local parameter newgeopos.
+        local parameter newalt.
+        local parameter geopos.
+        local parameter alt_.
+        local parameter color.
+        local parameter i.
+        
+        local vecToNewPos is newgeopos:altitudePosition(newalt).
+        local vecToOldPos is geopos:altitudePosition(alt_).
+        local vec is vecToNewPos - vecToOldPos.
+        vecDraw(
+            { return geopos:altitudePosition(alt_). },
+            vec, color, i, 1, true
+        ).
+    }
 
     function getImpactPos {
         parameter initialPosVec.
@@ -399,24 +417,6 @@ function ImpactPredictor {
         
         //return gravAccVec + dragAccVec + thrustAccVec.
         return gravAccVec + thrustAccVec.
-    }
-    
-    // DEBUG
-    function drawDebugVec {
-        local parameter newgeopos.
-        local parameter newalt.
-        local parameter geopos.
-        local parameter alt_.
-        local parameter color.
-        local parameter i.
-        
-        local vecToNewPos is newgeopos:altitudePosition(newalt).
-        local vecToOldPos is geopos:altitudePosition(alt_).
-        local vec is vecToNewPos - vecToOldPos.
-        vecDraw(
-            { return geopos:altitudePosition(alt_). },
-            vec, color, i, 1, true
-        ).
     }
     
     function getLandingPos { // TODO: not updated
