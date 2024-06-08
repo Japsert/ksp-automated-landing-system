@@ -1,1 +1,1 @@
-runPath("0:/landing/landing.ks").
+runPath("0:/landing/landing_debug.ks").

@@ -2,7 +2,7 @@
 clearScreen.
 clearVecDraws().
 
-runOncePath("0:/lib/landing/landing.ks").
+runOncePath("0:/lib/landing/landing_debug.ks").
 
 local precisionLander is PrecisionLander().
 
